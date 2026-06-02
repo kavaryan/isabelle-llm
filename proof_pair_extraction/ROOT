@@ -1,0 +1,8 @@
+session Dataset = HOL +
+  options [show_states = true, quick_and_dirty = true]
+  theories
+    Mirabelle_Custom
+    Proof_Context_Command
+    Simple
+    EdgeCases
+

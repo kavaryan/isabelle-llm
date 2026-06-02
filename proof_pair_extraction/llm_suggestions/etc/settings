@@ -1,0 +1,6 @@
+# -*- shell-script -*- :mode=shellscript:
+
+ISABELLE_LLM_SUGGESTIONS_HOME="$COMPONENT"
+
+# Make LLM_Verify.thy findable by Isabelle's session machinery
+ISABELLE_PATH="$ISABELLE_LLM_SUGGESTIONS_HOME:$ISABELLE_PATH"
