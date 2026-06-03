@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<!DOCTYPE DOCKABLES SYSTEM "dockables.dtd">
+
+<DOCKABLES>
+    <DOCKABLE NAME="llm-suggestions-dockable" MOVABLE="TRUE">
+        new isabelle.llm_suggestions.LLM_Suggestions_Dockable(view, position);
+    </DOCKABLE>
+</DOCKABLES>
