@@ -1,8 +1,8 @@
-package isabelle.llm_suggestions
+package isabelle.proof_pairs
 
 import isabelle._
 
-/* Shared parser for the XML produced by Proof_Context_Exporter
+/* Parser for the XML produced by Proof_Context_Exporter
    (proof_context_exporter.ML): <proof_goal>/<state> and
    <suggested_facts>/<fact>. Used by both the LLM Suggestions dockable and
    the Mirabelle data-extraction script (extract_mirabelle.scala). */

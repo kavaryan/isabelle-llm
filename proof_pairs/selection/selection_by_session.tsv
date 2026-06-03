@@ -1,0 +1,17 @@
+# session	theories(comma-sep)
+HOL	Bit_Operations,List,Transcendental
+HOL-Algebra	Divisibility,Polynomial_Divisibility,Polynomials
+HOL-Analysis	Further_Topology,Henstock_Kurzweil_Integration,Urysohn
+HOL-Cardinals	Cardinal_Order_Relation,Ordinal_Arithmetic,Wellorder_Constructions
+HOL-Combinatorics	Orbits,Perm,Permutations
+HOL-Complex_Analysis	Cauchy_Integral_Formula,Complex_Singularities,Laurent_Convergence
+HOL-Computational_Algebra	Formal_Laurent_Series,Formal_Power_Series,Polynomial
+HOL-Data_Structures	Array_Braun,Selection
+HOL-Decision_Procs	Approximation_Bounds,MIR,Parametric_Ferrante_Rackoff
+HOL-Hahn_Banach	Subspace,Vector_Space
+HOL-Homology	Invariance_of_Domain,Simplices
+HOL-Isar_Examples	Group,Mutilated_Checkerboard
+HOL-Lattice	CompleteLattice,Lattice
+HOL-Library	Extended_Real,Multiset
+HOL-Number_Theory	Cong,Pocklington,Residue_Primitive_Roots
+HOL-Probability	Probability_Mass_Function,SPMF
