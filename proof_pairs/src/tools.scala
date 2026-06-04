@@ -64,7 +64,13 @@ Usage: isabelle proof_pairs [OPTIONS] [THEORIES...]
         val file_theories = theory_files.flatMap(Proof_Pairs.read_theories)
         val theories = (file_theories ::: arg_theories).distinct
 
-        val progress = new Console_Progress(verbose = verbose)
+        class Custom_Progress extends Console_Progress(verbose = verbose, detailed = verbose) {
+          override def status_output(msgs: Progress.Output): Unit = synchronized {
+            val filtered = msgs.filterNot(msg => msg.message.text.startsWith("export "))
+            super.status_output(filtered)
+          }
+        }
+        val progress = new Custom_Progress
         val tool_options = if (verbose) options + "build_progress_detailed=true" else options
 
         progress.interrupt_handler {

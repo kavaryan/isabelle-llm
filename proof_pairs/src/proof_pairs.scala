@@ -2,19 +2,18 @@
     Author:     isabelle-llm
 
 Adhoc proof-pair extraction built on top of the official `isabelle
-process_theories` tool.
+process_theories` tool logic, reading directly from the SQLite database.
 
-Phase 1 (extract): compose an adhoc "Draft" session (via process_theories)
+Phase 1 (extract): compose an adhoc "Draft" session (via custom build)
 that re-elaborates the requested theories, with a custom build presentation
 hook injected as source files. The hook (proof_pairs_hook.ML) fires on the
-requested theories regardless of session qualifier -- unlike Mirabelle's hook,
-which is restricted to the build session and is therefore incompatible with the
-Draft session. For each proof step it exports a goal-state node and, optionally,
-MePo-suggested facts, produced by the shared Proof_Context_Exporter.
+requested theories regardless of session qualifier. For each proof step it
+exports a goal-state node and, optionally, MePo-suggested facts, produced by the
+shared Proof_Context_Exporter.
 
-Phase 2 (parse): read the structured exports together with the original theory
-sources, reconstruct the surrounding proof block via the outer syntax, and emit
-one JSON array per theory.
+Phase 2 (parse): read the structured exports directly from the SQLite database,
+together with the original theory sources, reconstruct the surrounding proof block
+via the outer syntax, and emit one JSON array per theory.
 */
 
 package isabelle.proof_pairs
@@ -39,17 +38,15 @@ object Proof_Pairs {
     Library.trim_split_lines(File.read(file)).filterNot(s => s.isEmpty || s.startsWith("#"))
 
 
-  /** phase 1: extract via process_theories + custom hook **/
+  /** phase 1: extract via process_theories-style session build **/
 
-  val EXPORT_PATTERN = "*:proof_pairs/**"
-
-  def extract(
+  def extract_session(
     options: Options,
     logic: String,
     theories: List[String],
     max_facts: Int,
     leaf_only: Boolean,
-    export_dir: Path,
+    tmp_dir: Path,
     progress: Progress = new Progress
   ): Build.Results = {
     val extract_options =
@@ -61,17 +58,65 @@ object Proof_Pairs {
     progress.echo("Extracting " + theories.length + " theories on logic " + quote(logic) +
       (if (max_facts > 0) " with " + max_facts + " suggested facts/goal" else "") + " ...")
 
-    Process_Theories.process_theories(
-      extract_options,
-      logic,
-      theories = theories,
-      files = injected_files,
-      export_files = List((export_dir.absolute.implode, 0, List(EXPORT_PATTERN))),
-      progress = progress)
+    val build_engine = Build.Engine(Build.engine_name(extract_options))
+    val build_options = build_engine.build_options(extract_options)
+
+    val session_name = Sessions.DRAFT
+    val session_dir = tmp_dir + Path.basic(session_name)
+    Isabelle_System.make_directory(session_dir)
+
+    var seen = Set.empty[JFile]
+    for (path0 <- injected_files) {
+      val path = path0.canonical
+      val file = path.file
+      if (!seen(file)) {
+        seen += file
+        val target = session_dir + path.base
+        if (target.is_file) {
+          error("Duplicate session source file " + path.base + " --- from " + path)
+        }
+        Isabelle_System.copy_file(path, target)
+      }
+    }
+
+    val sessions_structure = Sessions.load_structure(build_options)
+
+    val more_theories =
+      for (path <- injected_files; name <- Thy_Header.get_thy_name(path.implode))
+        yield name
+    val session_theories = theories ::: more_theories
+
+    val session_imports =
+      Set.from(
+        for {
+          name <- session_theories.iterator
+          session = sessions_structure.theory_qualifier(name)
+          if session.nonEmpty
+        } yield session).toList
+
+    progress.interrupt_handler {
+      Build.build_logic(extract_options, logic, progress = progress,
+        build_heap = true, strict = true)
+    }
+
+    val session_entry =
+      Sessions.Session_Entry(
+        parent = Some(logic),
+        theories = session_theories.map(a => (Nil, List(((a, Position.none), false)))),
+        imports = session_imports,
+        export_files = Nil)
+
+    val session_info =
+      Sessions.Info.make(session_entry, draft_session = true,
+        dir = session_dir, options = extract_options)
+
+    Build.build(extract_options, private_dir = Some(tmp_dir), progress = progress,
+      infos = List(session_info), selection = Sessions.Selection.session(session_name),
+      export_files = false)
   }
 
 
-  /** phase 2: parse exports into JSON **/
+  /** phase 2: parse exports from database into JSON **/
 
   sealed case class Record(
     theory: String, line: Int, offset: Int,
@@ -188,13 +233,13 @@ object Proof_Pairs {
     file_path: String, offset: Int, state: String,
     facts: List[Proof_Context_Parser.Fact])
 
-  private def read_export(file: JFile): Option[Raw] =
-    YXML.parse_body(YXML.Source(File.read(file))) match {
-      case List(XML.Elem(Markup("proof_pair", props), body)) =>
-        val goal = body.collectFirst { case e @ XML.Elem(Markup("proof_goal", _), _) => e }
+  private def parse_export_entry(body: XML.Body): Option[Raw] =
+    body match {
+      case List(XML.Elem(Markup("proof_pair", props), sub_body)) =>
+        val goal = sub_body.collectFirst { case e @ XML.Elem(Markup("proof_goal", _), _) => e }
           .flatMap(Proof_Context_Parser.parse_proof_goal)
         goal.map { case (file_path, offset, state) =>
-          val facts = body.collectFirst { case e @ XML.Elem(Markup("suggested_facts", _), _) => e }
+          val facts = sub_body.collectFirst { case e @ XML.Elem(Markup("suggested_facts", _), _) => e }
             .flatMap(Proof_Context_Parser.parse_facts).getOrElse(Nil)
           Raw(
             theory = Properties.get(props, "theory").getOrElse(""),
@@ -222,7 +267,7 @@ object Proof_Pairs {
 
   def parse(
     options: Options,
-    export_dir: Path,
+    store: Store,
     json_dir: Path,
     leaf_only: Boolean = false,
     no_apply: Boolean = false,
@@ -241,31 +286,37 @@ object Proof_Pairs {
             (v, tab + (file_path -> v))
         })
 
-    val files =
-      if (export_dir.is_dir) File.find_files(export_dir.file, file => file.isFile) else Nil
     val records =
-      for { file <- files; raw <- read_export(file) } yield {
-        val (history, block, commands, is_leaf, has_apply) =
-          if (raw.file_path.isEmpty) ("", "", Nil, true, false)
-          else
-            try { val (src, spans) = parsed(raw.file_path, Long_Name.qualifier(raw.theory))
-                  reconstruct(src, spans, raw.offset) }
-            catch { case exn: Throwable =>
-              progress.echo_warning("reconstruct failed for " + raw.theory +
-                " @" + raw.offset + ": " + exn.getMessage)
-              ("", "", Nil, true, false) }
-        Record(
-          theory = Long_Name.base_name(raw.theory),
-          line = raw.line,
-          offset = raw.offset,
-          command = Symbol.decode(raw.command),
-          proof_text_before = Symbol.decode(limit_context(history, context_symbols)),
-          state_before = Symbol.decode(raw.state),
-          suggested_facts = facts_json(raw.facts),
-          proof_block = Symbol.decode(block),
-          proof_commands = commands.map(Symbol.decode),
-          is_leaf = is_leaf,
-          has_apply = has_apply)
+      using(store.open_database(Sessions.DRAFT)) { db =>
+        val entry_names = Export.read_entry_names(db, Sessions.DRAFT)
+        val proof_pair_entries = entry_names.filter(name => name.theory.nonEmpty && name.name.startsWith("proof_pairs/"))
+        for {
+          entry_name <- proof_pair_entries
+          entry <- Export.read_entry(db, entry_name, store.cache)
+          raw <- parse_export_entry(entry.yxml())
+        } yield {
+          val (history, block, commands, is_leaf, has_apply) =
+            if (raw.file_path.isEmpty) ("", "", Nil, true, false)
+            else
+              try { val (src, spans) = parsed(raw.file_path, Long_Name.qualifier(raw.theory))
+                    reconstruct(src, spans, raw.offset) }
+              catch { case exn: Throwable =>
+                progress.echo_warning("reconstruct failed for " + raw.theory +
+                  " @" + raw.offset + ": " + exn.getMessage)
+                ("", "", Nil, true, false) }
+          Record(
+            theory = Long_Name.base_name(raw.theory),
+            line = raw.line,
+            offset = raw.offset,
+            command = Symbol.decode(raw.command),
+            proof_text_before = Symbol.decode(limit_context(history, context_symbols)),
+            state_before = Symbol.decode(raw.state),
+            suggested_facts = facts_json(raw.facts),
+            proof_block = Symbol.decode(block),
+            proof_commands = commands.map(Symbol.decode),
+            is_leaf = is_leaf,
+            has_apply = has_apply)
+        }
       }
 
     Isabelle_System.make_directory(json_dir)
@@ -299,9 +350,7 @@ object Proof_Pairs {
     progress: Progress = new Progress
   ): Unit = {
     if (theories.isEmpty) error("No theories given")
-    val export_dir = output_dir + Path.basic("export")
     val json_dir = output_dir + Path.basic("json")
-    if (export_dir.is_dir) Isabelle_System.rm_tree(export_dir)
     Isabelle_System.make_directory(output_dir)
 
     val structure = Sessions.load_structure(options)
@@ -315,23 +364,24 @@ object Proof_Pairs {
       val base = base_logic(session)
       progress.echo("=== session " + quote(session) + " on base " + quote(base) +
         ": " + group.length + " theories ===")
-      val results = extract(options, base, group, max_facts, leaf_only, export_dir, progress = progress)
-      if (!results.ok) error("Extraction failed for session " + quote(session) +
-        " (rc = " + results.rc + ")")
 
-      progress.echo("Parsing exports for session " + quote(session) +
-        (if (leaf_only) " (leaf proofs only)" else "") +
-        (if (no_apply) " (excluding apply proofs)" else "") + " ...")
-      val counts = parse(options, export_dir, json_dir,
-        leaf_only = leaf_only, no_apply = no_apply, context_symbols = context_symbols, progress = progress)
-      val total = counts.valuesIterator.sum
-      grand_total += total
-      theories_count += counts.size
-      for ((theory, n) <- counts.toList.sortBy(-_._2)) {
-        progress.echo("Wrote " + n + " proof-step records for " + theory + " -> " + json_dir)
+      Isabelle_System.with_tmp_dir("proof_pairs") { tmp_dir =>
+        val results = extract_session(options, base, group, max_facts, leaf_only, tmp_dir, progress = progress)
+        if (!results.ok) error("Extraction failed for session " + quote(session) +
+          " (rc = " + results.rc + ")")
+
+        progress.echo("Parsing exports for session " + quote(session) +
+          (if (leaf_only) " (leaf proofs only)" else "") +
+          (if (no_apply) " (excluding apply proofs)" else "") + " ...")
+        val counts = parse(options, results.store, json_dir,
+          leaf_only = leaf_only, no_apply = no_apply, context_symbols = context_symbols, progress = progress)
+        val total = counts.valuesIterator.sum
+        grand_total += total
+        theories_count += counts.size
+        for ((theory, n) <- counts.toList.sortBy(-_._2)) {
+          progress.echo("Wrote " + n + " proof-step records for " + theory + " -> " + json_dir)
+        }
       }
-
-      if (export_dir.is_dir) Isabelle_System.rm_tree(export_dir)
     }
 
     progress.echo("Finished! Wrote a grand total of " + grand_total + " proof-step records across " +
