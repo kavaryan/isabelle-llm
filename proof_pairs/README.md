@@ -24,53 +24,19 @@ isabelle scala_build
 isabelle proof_pairs -?
 ```
 
-## Why this design
+## Architecture
 
-`isabelle process_theories` composes a throwaway *adhoc* session ("Draft") that
-re-elaborates the requested theories on top of a base logic, with extra source
-files injected via `-f`. This avoids editing the distribution and avoids a full
-session rebuild driver.
-
-The one obstacle: Mirabelle's presentation hook only fires on theories whose
-*qualifier equals the build session* (`Draft`), but `process_theories` keeps the
-theories' original qualifier (e.g. `HOL-Lattice.CompleteLattice`). So Mirabelle's
-actions never run under `process_theories`.
-
-The fix is a **thin custom presentation hook** (`ml/proof_pairs_hook.ML`, via
-`Build.add_hook`) that selects theories by their fully-qualified *name* instead
-of by session qualifier. The goal state and MePo facts are produced by
-`Proof_Context_Exporter` (`ml/proof_context_exporter.ML`:
-`make_goal_state_node` + `make_sledgehammer_facts_node`). The component is
-self-contained — it carries its own copy of the exporter ML and the XML parser.
+The tool operates in two phases:
+1. **Extraction (Phase 1)**: Uses `isabelle process_theories` to compose a temporary ad-hoc session ("Draft") that re-elaborates the target theories on top of their parent session. A custom presentation hook (`ml/proof_pairs_hook.ML`) intercepts the compilation to export proof steps (goal states and Sledgehammer/MePo facts) using the `Proof_Context_Exporter` as PIDE exports.
+2. **Parsing (Phase 2)**: Scans the exported data and the original theory sources to reconstruct the surrounding proof blocks and emit a structured JSON file per theory.
 
 ```
-isabelle process_theories                 (official adhoc-session driver)
-  └─ -f Proof_Pairs_Hook.thy + exporter   (injected; registers the hook)
-       └─ Build.add_hook                   (fires per proof step, any qualifier)
-            └─ Proof_Context_Exporter      (goal state + MePo facts -> PIDE export)
-  └─ -E "*:proof_pairs/**"                 (exports written to disk)
-        └─ phase 2: parse exports + theory sources -> JSON   (Proof_Context_Parser)
-```
-
-## Status
-
-Verified end-to-end. Test run on two selected theories with facts:
-
-```
-$ isabelle proof_pairs -m 16 -d out_test HOL-Lattice.CompleteLattice HOL-Lattice.Lattice
-Wrote 229 proof-step records across 2 theories  (~2 min)
-  command types: {by: 123, proof: 106}, every record carries 16 MePo facts
-```
-
-Sample record (`Lattice`, line 42):
-
-```
-tactic_source : by (rule the_equality) (rule is_inf_uniq [OF _ \<open>is_inf x y inf\<close>])
-state_before  : proof (prove)
-                using this:  is_inf x y inf
-                goal (1 subgoal):
-                 1. (THE inf. is_inf x y inf) = inf
-suggested_facts: is_inf x y inf, ex_inf, meet_def, the_equality [intro], the_eq_trivial [simp]
+isabelle process_theories                 (adhoc session driver)
+  └─ Proof_Pairs_Hook.thy + exporter       (registers custom hook)
+       └─ Build.add_hook                   (intercepts proof steps)
+            └─ Proof_Context_Exporter      (exports goal state + MePo facts)
+  └─ PIDE exports on disk
+        └─ Phase 2 Parser                  (merges exports + source into JSON)
 ```
 
 ## Per-session grouping (automatic base)
@@ -143,11 +109,10 @@ isabelle proof_pairs -L -m 16 -c 4000 -T theories.txt -d out
 Scale: ~25k leaf records across the 41 theories, ≈ 6 h wall-clock (MePo on
 leaves only).
 
-## Theory list
+## Theory lists
 
-- `theories.txt` — all 41 selected theories (qualified names), generated from
-  `selection/selection_by_session.tsv` (see `selection/README.md` for how the
-  curation was produced).
+- `theories.txt` — list of all 41 selected theories.
+- `theories_2k.txt` — curated subset of high-quality theories targeting ~2,000 goals.
 
 ## Output schema (per record)
 

@@ -12,4 +12,4 @@ set -e
 #  -T theories_2k.txt: target theories yielding ~2000 goals in total
 #  -d out: output directory
 # Any additional arguments passed to this script will override/augment the command options.
-/opt/Isabelle2025-2/bin/isabelle proof_pairs -L -A -m 16 -c 4000 -v -T theories_2k.txt -d out "$@"
+isabelle proof_pairs -L -A -m 16 -c 4000 -v -T theories_2k.txt -d out "$@"
