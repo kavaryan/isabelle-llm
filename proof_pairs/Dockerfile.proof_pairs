@@ -1,0 +1,21 @@
+FROM makarius/isabelle:Isabelle2025-2
+
+COPY --chown=isabelle:isabelle proof_pairs /home/isabelle/proof_pairs
+
+USER root
+RUN mkdir -p /out \
+    && chown isabelle:isabelle /out
+
+USER isabelle
+ENV ISABELLE_HOME=/home/isabelle/Isabelle
+ENV PATH="${ISABELLE_HOME}/bin:${PATH}"
+WORKDIR /home/isabelle/proof_pairs
+
+RUN isabelle components -u /home/isabelle/proof_pairs \
+    && isabelle scala_build \
+    && isabelle proof_pairs -? 2>&1 | grep -q "Usage: isabelle proof_pairs"
+
+VOLUME ["/out"]
+USER root
+ENV HOME=/home/isabelle
+ENTRYPOINT ["isabelle", "proof_pairs", "-d", "/out"]
