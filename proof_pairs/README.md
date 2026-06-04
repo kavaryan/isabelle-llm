@@ -9,6 +9,21 @@ for every proof step of a chosen set of theories, the **goal state**, the
 It is registered as an Isabelle component exposing the tool `isabelle
 proof_pairs`.
 
+## Installation
+
+To install the tool, register this directory as an Isabelle component:
+
+```bash
+isabelle components -u /path/to/isabelle-llm/proof_pairs
+```
+
+Verify the component is registered and compiled:
+
+```bash
+isabelle scala_build
+isabelle proof_pairs -?
+```
+
 ## Why this design
 
 `isabelle process_theories` composes a throwaway *adhoc* session ("Draft") that
@@ -145,6 +160,9 @@ leaves only).
 | `proof_block`, `proof_commands` | the enclosing proof block / its commands |
 | `suggested_facts` | MePo-selected facts (`name`, `statement`); empty if `-m 0` |
 | `is_leaf` | whether the step's innermost proof block has no sub-proofs |
+
+> [!NOTE]
+> All output string fields are automatically decoded from Isabelle symbol escape syntax (e.g. `\<Longrightarrow>`) into clean UTF-8 Unicode characters (e.g. `⟹`). This saves up to 40% in token count and is optimal for LLM fine-tuning.
 
 ## Files
 

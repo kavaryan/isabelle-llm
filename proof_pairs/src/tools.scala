@@ -39,13 +39,12 @@ Usage: isabelle proof_pairs [OPTIONS] [THEORIES...]
     -m FACTS     sledgehammer relevance facts per goal (default 0 = no sledgehammer)
     -o OPTION    override Isabelle system OPTION (via NAME=VAL or NAME)
     -d DIR       output directory (default: """ + output_dir + """)
-    -v           verbose mode
+    -v           verbose mode (detailed theory compilation progress)
 
   Extract proof-pair training data (goal state, proof block, and optionally
-  relevance-filtered facts) for the given theories, named as
-  qualified names (e.g. HOL-Analysis.Starlike). Theories are grouped by session
-  and each group is re-elaborated on that session's parent, so everything below
-  the session is supplied prebuilt. Results: <DIR>/json/<Theory>.json.
+  relevance-filtered facts) for the given theories. All output string fields
+  are automatically decoded from Isabelle symbols to UTF-8 Unicode.
+  Results: <DIR>/json/<Theory>.json.
 
   Examples:
     isabelle proof_pairs HOL-Lattice.CompleteLattice HOL-Lattice.Lattice
