@@ -1,10 +1,10 @@
-section "Proof Pairs"
+section "Proof Extractor"
 
-option proof_pairs_theories : string = ""
+option proof_extractor_theories : string = ""
   -- "comma-separated fully-qualified theory names to extract proof pairs from"
 
-option proof_pairs_max_facts : int = 0
+option proof_extractor_max_facts : int = 0
   -- "number of MePo-suggested facts to export per goal (0: skip sledgehammer)"
 
-option proof_pairs_leaf_only : bool = false
+option proof_extractor_leaf_only : bool = false
   -- "export only leaf proof steps (skip non-leaf goals before MePo runs)"

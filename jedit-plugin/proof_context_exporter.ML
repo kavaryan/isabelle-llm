@@ -38,12 +38,13 @@ fun get_mepo_facts ctxt thy chained_ths hyp_ts concl_t max_facts arguments =
 fun format_fact ctxt ((name, (_, status)), thm) =
   let
     val stmt = Pretty.pure_string_of (Thm.pretty_thm ctxt thm)
+    val extern_name = Facts.extern ctxt (Proof_Context.facts_of ctxt) name
 
     val is_simp  = (status = ATP_Problem_Generate.Simp)
     val is_intro = (status = ATP_Problem_Generate.Intro)
     val is_elim  = (status = ATP_Problem_Generate.Elim)
 
-    val a0 = [("name", name)]
+    val a0 = [("name", extern_name)]
     val a1 = if is_simp  then ("simp",  "true") :: a0 else a0
     val a2 = if is_intro then ("intro", "true") :: a1 else a1
     val a3 = if is_elim  then ("elim",  "true") :: a2 else a2

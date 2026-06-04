@@ -1,38 +1,34 @@
 # Proof Pairs (adhoc extraction)
 
-An alternative proof-pair extractor built on the official **`isabelle
-process_theories`** tool instead of a full Mirabelle session run. It extracts,
-for every proof step of a chosen set of theories, the **goal state**, the
-**tactic**, the surrounding **proof block**, and optionally the
-**MePo/sledgehammer-suggested facts** — emitting one JSON array per theory.
+A proof-pair extractor that builds an ad-hoc session to re-elaborate theories and export proof steps (goal states, tactics, surrounding proof blocks, and suggested facts) into structured JSON files.
 
 It is registered as an Isabelle component exposing the tool `isabelle
-proof_pairs`.
+proof_extractor`.
 
 ## Installation
 
 To install the tool, register this directory as an Isabelle component:
 
 ```bash
-isabelle components -u /path/to/isabelle-llm/proof_pairs
+isabelle components -u /path/to/isabelle-llm/extractor
 ```
 
 Verify the component is registered and compiled:
 
 ```bash
 isabelle scala_build
-isabelle proof_pairs -?
+isabelle proof_extractor -?
 ```
 
 ## Architecture
 
 The tool operates in two phases:
-1. **Extraction (Phase 1)**: Uses `isabelle process_theories` to compose a temporary ad-hoc session ("Draft") that re-elaborates the target theories on top of their parent session. A custom presentation hook (`ml/proof_pairs_hook.ML`) intercepts the compilation to export proof steps (goal states and Sledgehammer/MePo facts) using the `Proof_Context_Exporter` as PIDE exports.
+1. **Extraction (Phase 1)**: Builds a temporary ad-hoc session ("Draft") using Isabelle's Scala build engine that re-elaborates the target theories on top of their parent session. A custom presentation hook (`ml/proof_extractor_hook.ML`) intercepts the compilation to export proof steps (goal states and Sledgehammer/MePo facts) using the `Proof_Context_Exporter` as PIDE exports.
 2. **Parsing (Phase 2)**: Scans the exported data and the original theory sources to reconstruct the surrounding proof blocks and emit a structured JSON file per theory.
 
 ```
-isabelle process_theories                 (adhoc session driver)
-  └─ Proof_Pairs_Hook.thy + exporter       (registers custom hook)
+Isabelle Scala Build Engine               (adhoc session driver)
+  └─ Proof_Extractor_Hook.thy + exporter   (registers custom hook)
        └─ Build.add_hook                   (intercepts proof steps)
             └─ Proof_Context_Exporter      (exports goal state + MePo facts)
   └─ PIDE exports on disk
@@ -60,20 +56,40 @@ re-elaborated; only *lower* sessions are supplied prebuilt.
 
 ```bash
 # a couple of theories, no facts (fast):
-isabelle proof_pairs HOL-Lattice.CompleteLattice HOL-Lattice.Lattice
+isabelle proof_extractor HOL-Lattice.CompleteLattice HOL-Lattice.Lattice
 
 # all selected theories, 32 MePo facts per goal:
-isabelle proof_pairs -m 32 -T theories.txt -d out
+isabelle proof_extractor -m 32 -T theories.txt -d out
 
 # leaf proofs only (atomic terminal steps, no structural `proof` wrappers):
-isabelle proof_pairs -L -m 32 -T theories.txt -d out_leaf
+isabelle proof_extractor -L -m 32 -T theories.txt -d out_leaf
 
 # exclude proofs containing any 'apply' command:
-isabelle proof_pairs -A -T theories.txt -d out_no_apply
+isabelle proof_extractor -A -T theories.txt -d out_no_apply
 ```
 
 Output: `<out>/json/<Theory>.json`, plus the raw PIDE exports under
 `<out>/export/`.
+
+## Docker Usage
+
+A pre-configured Dockerfile is available to run the extractor in a containerized environment without requiring a local Isabelle installation.
+
+### 1. Build the Docker Image
+Run the following build command from the repository root directory:
+```bash
+docker build -t isabelle-extractor -f extractor/Dockerfile .
+```
+
+### 2. Run the Extractor
+Mount a local directory to the `/out` volume to save the extracted JSON results:
+```bash
+# Run extraction for specific theories
+docker run --rm -v "$PWD/out":/out isabelle-extractor HOL-Lattice.CompleteLattice HOL-Lattice.Lattice
+
+# Run extraction using configuration options (e.g., theory lists and fact limits)
+docker run --rm -v "$PWD/out":/out isabelle-extractor -m 16 -T theories.txt
+```
 
 Options: `-L` leaf proofs only, `-A` exclude proofs containing any 'apply'
 command, `-c N` cap `proof_text_before` to its last N
@@ -103,7 +119,7 @@ Calibrated against a ~4096-token training sequence (`tiktoken` proxy):
   examples ≈ 1900 tok median / 2300 p90, comfortably within a 4K window.
 
 ```bash
-isabelle proof_pairs -L -m 16 -c 4000 -T theories.txt -d out
+isabelle proof_extractor -L -m 16 -c 4000 -T theories.txt -d out
 ```
 
 Scale: ~25k leaf records across the 41 theories, ≈ 6 h wall-clock (MePo on
@@ -132,9 +148,9 @@ leaves only).
 ## Files
 
 - `etc/build.props`, `etc/settings`, `etc/options` — component definition
-- `src/proof_pairs.scala` — extract (phase 1) + parse (phase 2)
+- `src/proof_extractor.scala` — extract (phase 1) + parse (phase 2)
 - `src/proof_context_parser.scala` — XML parser for the exporter's output
-- `src/tools.scala` — `isabelle proof_pairs` tool wrapper
-- `ml/proof_pairs_hook.ML` — the custom `Build.add_hook` (+ leaf detection)
+- `src/tools.scala` — `isabelle proof_extractor` tool wrapper
+- `ml/proof_extractor_hook.ML` — the custom `Build.add_hook` (+ leaf detection)
 - `ml/proof_context_exporter.ML` — goal-state + MePo-facts exporter
-- `ml/Proof_Pairs_Hook.thy` — loads the exporter + hook into the Draft session
+- `ml/Proof_Extractor_Hook.thy` — loads the exporter + hook into the Draft session

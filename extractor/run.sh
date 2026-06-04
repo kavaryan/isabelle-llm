@@ -3,7 +3,7 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# Run the proof-pair extractor with recommended defaults:
+# Run the proof-extractor with recommended defaults:
 #  -L: keep only leaf proofs (steps whose innermost proof block has no nested sub-proofs)
 #  -A: exclude proofs containing any 'apply' command
 #  -m 16: cap sledgehammer relevance facts per goal to 16
@@ -12,12 +12,12 @@ set -e
 #  -T theories_2k.txt: target theories yielding ~2000 goals in total
 #  -d out: output directory
 # Any additional arguments passed to this script will override/augment the command options.
-# isabelle proof_pairs -L -A -m 16 -c 4000 -v -T theories_2k.txt -d out "$@"
+# isabelle proof_extractor -L -A -m 16 -c 4000 -v -T theories_2k.txt -d out "$@"
 
 
-mkdir -p proof_pairs_out
+mkdir -p proof_extractor_out
 
 docker run --rm \
-  -v "$PWD/proof_pairs_out:/out" \
-  isabelle-proof-pairs:2025-2 \
+  -v "$PWD/proof_extractor_out:/out" \
+  isabelle-extractor:2025-2 \
   -L -A -m 0 -c 4000 -v -T theories_2k.txt

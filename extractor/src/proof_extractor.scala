@@ -16,22 +16,22 @@ together with the original theory sources, reconstruct the surrounding proof blo
 via the outer syntax, and emit one JSON array per theory.
 */
 
-package isabelle.proof_pairs
+package isabelle.proof_extractor
 
 import java.io.{File => JFile}
 
 import isabelle._
 
 
-object Proof_Pairs {
+object Proof_Extractor {
   /* injected source files: the custom hook + the goal-state/facts exporter */
 
-  def home: Path = Path.explode("$ISABELLE_PROOF_PAIRS_HOME")
+  def home: Path = Path.explode("$ISABELLE_PROOF_EXTRACTOR_HOME")
 
   def injected_files: List[Path] =
     List(
-      home + Path.explode("ml/Proof_Pairs_Hook.thy"),
-      home + Path.explode("ml/proof_pairs_hook.ML"),
+      home + Path.explode("ml/Proof_Extractor_Hook.thy"),
+      home + Path.explode("ml/proof_extractor_hook.ML"),
       home + Path.explode("ml/proof_context_exporter.ML"))
 
   def read_theories(file: Path): List[String] =
@@ -51,9 +51,9 @@ object Proof_Pairs {
   ): Build.Results = {
     val extract_options =
       options +
-        ("proof_pairs_theories=" + theories.mkString(",")) +
-        ("proof_pairs_max_facts=" + max_facts) +
-        ("proof_pairs_leaf_only=" + leaf_only)
+        ("proof_extractor_theories=" + theories.mkString(",")) +
+        ("proof_extractor_max_facts=" + max_facts) +
+        ("proof_extractor_leaf_only=" + leaf_only)
 
     progress.echo("Extracting " + theories.length + " theories on logic " + quote(logic) +
       (if (max_facts > 0) " with " + max_facts + " suggested facts/goal" else "") + " ...")
@@ -289,7 +289,7 @@ object Proof_Pairs {
     val records =
       using(store.open_database(Sessions.DRAFT)) { db =>
         val entry_names = Export.read_entry_names(db, Sessions.DRAFT)
-        val proof_pair_entries = entry_names.filter(name => name.theory.nonEmpty && name.name.startsWith("proof_pairs/"))
+        val proof_pair_entries = entry_names.filter(name => name.theory.nonEmpty && name.name.startsWith("proof_extractor/"))
         for {
           entry_name <- proof_pair_entries
           entry <- Export.read_entry(db, entry_name, store.cache)
@@ -302,7 +302,7 @@ object Proof_Pairs {
                     reconstruct(src, spans, raw.offset) }
               catch { case exn: Throwable =>
                 progress.echo_warning("reconstruct failed for " + raw.theory +
-                  " @" + raw.offset + ": " + exn.getMessage)
+                   " @" + raw.offset + ": " + exn.getMessage)
                 ("", "", Nil, true, false) }
           Record(
             theory = Long_Name.base_name(raw.theory),
@@ -338,7 +338,7 @@ object Proof_Pairs {
      prebuilt and only the session's own theories re-run). An explicit `logic`
      overrides this for every group. */
 
-  def proof_pairs(
+  def proof_extractor(
     options: Options,
     logic: Option[String],
     theories: List[String],
@@ -365,7 +365,7 @@ object Proof_Pairs {
       progress.echo("=== session " + quote(session) + " on base " + quote(base) +
         ": " + group.length + " theories ===")
 
-      Isabelle_System.with_tmp_dir("proof_pairs") { tmp_dir =>
+      Isabelle_System.with_tmp_dir("proof_extractor") { tmp_dir =>
         val results = extract_session(options, base, group, max_facts, leaf_only, tmp_dir, progress = progress)
         if (!results.ok) error("Extraction failed for session " + quote(session) +
           " (rc = " + results.rc + ")")

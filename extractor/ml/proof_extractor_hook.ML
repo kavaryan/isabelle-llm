@@ -1,24 +1,21 @@
-(*  Title:      proof_pairs/ml/proof_pairs_hook.ML
+(*  Title:      extractor/ml/proof_extractor_hook.ML
     Author:     isabelle-llm
 
-A build presentation hook (Build.add_hook) that exports a goal-state node and,
-optionally, MePo-suggested facts for every proof step of the requested
-theories. It is the Mirabelle presentation hook stripped to the essentials:
-crucially it selects theories by their fully-qualified name
-(proof_pairs_theories) rather than by the session qualifier, so it also fires
-on theories re-elaborated inside an adhoc "Draft" session (as produced by
-`isabelle process_theories`). Goal state and facts are produced by the shared
-Proof_Context_Exporter and emitted as one structured PIDE export per goal,
-"proof_pairs/<line>/<offset>", a <proof_pair> node carrying theory/command/line
-as attributes with the goal-state and facts nodes as children.
+A parallelized build presentation hook (Build.add_hook) that exports a goal-state
+node and, optionally, MePo-suggested facts for every proof step of the requested
+theories in parallel using Isabelle's Par_List structure. Goal state and facts
+are produced by the shared Proof_Context_Exporter and emitted as one structured
+PIDE export per goal: "proof_extractor/<line>/<offset>", a <proof_pair> node
+carrying theory/command/line as attributes with the goal-state and facts nodes
+as children.
 
-When proof_pairs_leaf_only is set, non-leaf steps are skipped *before* the
+When proof_extractor_leaf_only is set, non-leaf steps are skipped *before* the
 (expensive) MePo call -- a leaf step is one whose innermost enclosing proof
 block has no nested sub-proofs. The block structure mirrors the Scala
-find_proof_blocks (cf. proof_pairs.scala).
+find_proof_blocks (cf. proof_extractor.scala).
 *)
 
-structure Proof_Pairs_Hook =
+structure Proof_Extractor_Hook =
 struct
 
 (* proof commands whose pre-state is exported (cf. mirabelle_subgoals) *)
@@ -82,7 +79,7 @@ fun export_step max_facts thy_long_name leaf_only blocks (i, seg) =
                 [("theory", thy_long_name), ("command", name),
                  ("line", string_of_int line)]), children);
             val binding =
-              Path.binding0 (Path.basic "proof_pairs" +
+              Path.binding0 (Path.basic "proof_extractor" +
                 Path.basic (string_of_int line) + Path.basic (string_of_int offset));
           in Export.export thy binding [XML.Text (YXML.string_of node)] end;
         (* tolerate per-goal failures (e.g. sledgehammer) without aborting the
@@ -95,25 +92,27 @@ val _ =
   Build.add_hook (fn _ => fn loaded_theories =>
     let
       val targets =
-        space_explode "," (Options.default_string \<^system_option>\<open>proof_pairs_theories\<close>);
-      val max_facts = Options.default_int \<^system_option>\<open>proof_pairs_max_facts\<close>;
-      val leaf_only = Options.default_bool \<^system_option>\<open>proof_pairs_leaf_only\<close>;
+        space_explode "," (Options.default_string \<^system_option>\<open>proof_extractor_theories\<close>);
+      val max_facts = Options.default_int \<^system_option>\<open>proof_extractor_max_facts\<close>;
+      val leaf_only = Options.default_bool \<^system_option>\<open>proof_extractor_leaf_only\<close>;
     in
       if null targets orelse forall (fn s => s = "") targets then ()
       else
-        loaded_theories
-        |> List.app (fn (thy, segments) =>
-            let val thy_long_name = Context.theory_long_name thy in
-              if member (op =) targets thy_long_name then
-                let
-                  val blocks =
-                    if leaf_only then command_blocks (Thy_Header.get_keywords thy) segments else [];
-                in
-                  List.app (export_step max_facts thy_long_name leaf_only blocks)
-                    (map_index I segments)
-                end
-              else ()
-            end)
+        let
+          val _ =
+            Par_List.map (fn (thy, segments) =>
+              let val thy_long_name = Context.theory_long_name thy in
+                if member (op =) targets thy_long_name then
+                  let
+                    val blocks =
+                      if leaf_only then command_blocks (Thy_Header.get_keywords thy) segments else [];
+                    val _ =
+                      Par_List.map (export_step max_facts thy_long_name leaf_only blocks)
+                        (map_index I segments);
+                  in () end
+                else ()
+              end) loaded_theories;
+        in () end
     end);
 
 end;

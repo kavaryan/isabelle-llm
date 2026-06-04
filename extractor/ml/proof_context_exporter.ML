@@ -34,7 +34,14 @@ fun get_mepo_facts ctxt thy chained_ths hyp_ts concl_t max_facts arguments =
   end
 
 (* fact_info : string * (scope * status), stature = (scope, status)
-   We read the status directly -- no extra lookups needed. *)
+   We read the status directly -- no extra lookups needed.
+
+   [[name]] is the resolved fact identifier Sledgehammer uses:
+   [[Sledgehammer_MePo.mepo_suggested_facts]] returns a [[Sledgehammer_Fact.fact]]
+   whose name is already externalised (via [[get_name]] in sledgehammer_fact.ML).
+   It is emitted verbatim -- do not run it through [[Facts.extern]] again, which
+   expects an *internal* name and would re-hide an already-external one as
+   "??.<name>" (cf. [[Long_Name.hidden]]). *)
 fun format_fact ctxt ((name, (_, status)), thm) =
   let
     val stmt = Pretty.pure_string_of (Thm.pretty_thm ctxt thm)
@@ -54,7 +61,11 @@ fun format_fact ctxt ((name, (_, status)), thm) =
 fun make_sledgehammer_facts_node pre max_facts arguments =
   let
     val thy = Proof.theory_of pre
-    val {context = ctxt, facts = chained_ths, goal} = Proof.goal pre
+    (* Resolve facts as Sledgehammer does (cf. sledgehammer.ML, [[run_sledgehammer]]):
+       the OUTER proof context [[Proof.context_of pre]], with only the chained
+       facts and goal term taken from [[Proof.goal pre]]. *)
+    val ctxt = Proof.context_of pre
+    val {facts = chained_ths, goal, ...} = Proof.goal pre
     val subgoal = 1
     val (_, hyp_ts, concl_t) = ATP_Util.strip_subgoal goal subgoal ctxt
 

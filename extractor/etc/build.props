@@ -1,0 +1,10 @@
+title = Proof Extractor (adhoc extraction)
+module = lib/proof_extractor.jar
+requirements = \
+  env:ISABELLE_SCALA_JAR
+sources = \
+  src/proof_context_parser.scala \
+  src/proof_extractor.scala \
+  src/tools.scala
+services = \
+  isabelle.proof_extractor.Tools

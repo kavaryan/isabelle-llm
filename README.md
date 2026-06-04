@@ -1,20 +1,76 @@
-# Trainig data
-We can use:
-- [ ] docker run --rm   -v "$PWD":/home/isabelle/work   makarius/isabelle:Isabelle2025-2   process_theories -O -D /home/isabelle/work Hello
-- [ ] https://isabelle.in.tum.de/dist/Isabelle2025-2/doc/system.pdf
+# Isabelle/HOL LLM Integration
 
+This repository provides tools and plugins to integrate Large Language Models (LLMs) with the Isabelle/HOL interactive theorem prover. It supports both offline training data extraction and online interactive proof assistance.
 
---
-SFT Template:
-You're an experienced Isabelle/HOL proof engineer with good grasp of math and computer science algorithms.
-Please complete the following proof.
-Theory file ending with the fact to proof: {e.proof_text_before}
-Proof state: {e.state_before}
-{if suggested_facts: 'Suggested facts:' {suggested_facts} else ''}
+## Directory Structure
 
-<Prompt to continue>
-{e.proof_block}
+*   [extractor/](extractor): A custom Isabelle component and Scala/ML CLI tool (`isabelle proof_extractor`) to extract proof-step datasets (enclosing proof blocks, goal states, tactics, and relevance-filtered sledgehammer facts) from Isabelle theories into structured JSON files.
+*   [jedit-plugin/](jedit-plugin): An Isabelle/jEdit IDE plugin that adds a panel to suggest real-time tactics and proofs using local or remote LLM backends.
+*   [sft/](sft): Supervised Fine-Tuning (SFT) resources, including prompt templates for formatting extracted proof pairs into LLM instruction-following datasets.
 
+---
 
+## Supervised Fine-Tuning (SFT) Template
 
+Prompt templates format extracted proof pairs for training. The standard template is located at [sft/prompt_jinja2_template.txt](sft/prompt_jinja2_template.txt):
 
+```jinja2
+You are an expert Isabelle/HOL proof assistant. Complete the current subgoal in the unfinished proof using a single one-liner command sequence.
+
+CRITICAL RULES:
+1. The completion MUST be a single line containing at most one `by` invocation, optionally preceded by `using` or `unfolding` clauses.
+2. Allowed formats:
+   - `by <method>`
+   - `using <facts> by <method>`
+   - `unfolding <definitions> by <method>`
+   - `using <facts> unfolding <definitions> by <method>`
+3. Do NOT use multi-step or structural proof commands (e.g., `proof`, `qed`, `have`, `show`, `fix`, `assume`, `next`, `obtain`).
+4. Do NOT use interactive, diagnostic, or unfinished commands (e.g., `apply`, `sledgehammer`, `sorry`, `oops`, `try0`).
+5. Output ONLY the raw Isabelle proof text to complete the proof. Do not include any explanations, markdown code blocks, comments, or preamble.
+
+<context_theory>
+{{ proof_text_before }}
+</context_theory>
+
+<proof_state>
+{{ state_before }}
+</proof_state>
+
+{% if suggested_facts -%}
+<suggested_facts>
+{{ suggested_facts }}
+</suggested_facts>
+{%- endif %}
+
+<unfinished_proof>
+{{ proof_block }}
+</unfinished_proof>
+
+Complete the proof:
+```
+
+---
+
+## Getting Started
+
+### 1. Proof Step Extraction
+To extract datasets from your Isabelle theories:
+```bash
+# Register the extractor component
+isabelle components -u /path/to/isabelle-llm/extractor
+
+# Rebuild Scala tools
+isabelle scala_build
+
+# Run the extractor
+isabelle proof_extractor -m 16 -c 4000 -T theories.txt -d out
+```
+See the [extractor README](extractor/README.md) for usage options and output schemas.
+
+### 2. IDE Suggestions Plugin
+To use interactive LLM recommendations in Isabelle/jEdit:
+```bash
+# Register the plugin component
+isabelle components -u /path/to/isabelle-llm/jedit-plugin
+```
+Once registered, the plugin will load on Isabelle startup and expose the **LLM Suggestions** dockable panel in jEdit.

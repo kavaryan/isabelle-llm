@@ -1,6 +1,6 @@
 FROM makarius/isabelle:Isabelle2025-2
 
-COPY --chown=isabelle:isabelle proof_pairs /home/isabelle/proof_pairs
+COPY --chown=isabelle:isabelle extractor /home/isabelle/extractor
 
 USER root
 RUN mkdir -p /out \
@@ -9,9 +9,9 @@ RUN mkdir -p /out \
 USER isabelle
 ENV ISABELLE_HOME=/home/isabelle/Isabelle
 ENV PATH="${ISABELLE_HOME}/bin:${PATH}"
-WORKDIR /home/isabelle/proof_pairs
+WORKDIR /home/isabelle/extractor
 
-RUN isabelle components -u /home/isabelle/proof_pairs \
+RUN isabelle components -u /home/isabelle/extractor \
     && isabelle scala_build \
     && isabelle proof_pairs -? 2>&1 | grep -q "Usage: isabelle proof_pairs"
 

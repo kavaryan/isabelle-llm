@@ -1,4 +1,4 @@
-package isabelle.proof_pairs
+package isabelle.proof_extractor
 
 import isabelle._
 

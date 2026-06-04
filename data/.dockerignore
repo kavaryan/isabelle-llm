@@ -1,9 +1,0 @@
-d/Isabelle2025-2
-d/Isabelle2025-2_linux.tar.gz
-d/*.thy
-d/*.thy~
-d/AutoCorrode/.git
-d/AutoCorrode/.github
-d/AutoCorrode/dependencies
-d/AutoCorrode/ip
-d/AutoCorrode/ir
