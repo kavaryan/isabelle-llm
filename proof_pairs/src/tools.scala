@@ -21,6 +21,7 @@ object Proof_Pairs_Tool {
         var options = Options.init()
         var theory_files: List[Path] = Nil
         var leaf_only = false
+        var no_apply = false
         var context_symbols = 0
         var verbose = false
 
@@ -32,6 +33,7 @@ Usage: isabelle proof_pairs [OPTIONS] [THEORIES...]
                  repeatable, combined with any THEORIES given as arguments
     -L           keep only leaf proofs (steps whose innermost proof block has
                  no nested sub-proofs)
+    -A           exclude proofs containing any 'apply' command
     -c N         limit proof_text_before to its last N symbols (default 0 = full)
     -l NAME      base logic for all sessions (default: each session's parent)
     -m FACTS     sledgehammer relevance facts per goal (default 0 = no sledgehammer)
@@ -51,6 +53,7 @@ Usage: isabelle proof_pairs [OPTIONS] [THEORIES...]
 """,
           "T:" -> (arg => theory_files = theory_files ::: List(Path.explode(arg))),
           "L" -> (_ => leaf_only = true),
+          "A" -> (_ => no_apply = true),
           "c:" -> (arg => context_symbols = Value.Int.parse(arg)),
           "l:" -> (arg => logic = Some(arg)),
           "m:" -> (arg => max_facts = Value.Int.parse(arg)),
@@ -63,10 +66,11 @@ Usage: isabelle proof_pairs [OPTIONS] [THEORIES...]
         val theories = (file_theories ::: arg_theories).distinct
 
         val progress = new Console_Progress(verbose = verbose)
+        val tool_options = if (verbose) options + "build_progress_detailed=true" else options
 
         progress.interrupt_handler {
-          Proof_Pairs.proof_pairs(options, logic, theories, max_facts, output_dir,
-            leaf_only = leaf_only, context_symbols = context_symbols, progress = progress)
+          Proof_Pairs.proof_pairs(tool_options, logic, theories, max_facts, output_dir,
+            leaf_only = leaf_only, no_apply = no_apply, context_symbols = context_symbols, progress = progress)
         }
       })
 }

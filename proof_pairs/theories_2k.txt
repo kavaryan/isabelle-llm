@@ -1,0 +1,20 @@
+# Curation of high-quality Isabelle/Isar theories targeting ~2000 leaf goals.
+# Selected for idiomatic Isar proof style, clean structure, and mathematical relevance.
+
+# session: HOL-Lattice (pure declarative Isar proofs)
+HOL-Lattice.Lattice
+HOL-Lattice.CompleteLattice
+
+# session: HOL-Isar_Examples (showcase examples of high-quality Isar proofs)
+HOL-Isar_Examples.Group
+HOL-Isar_Examples.Mutilated_Checkerboard
+
+# session: HOL-Combinatorics (modern combinatorial proofs)
+HOL-Combinatorics.Perm
+HOL-Combinatorics.Orbits
+HOL-Combinatorics.Permutations
+
+# session: HOL-Number_Theory (classical arithmetic proofs)
+HOL-Number_Theory.Cong
+HOL-Number_Theory.Pocklington
+HOL-Number_Theory.Residue_Primitive_Roots

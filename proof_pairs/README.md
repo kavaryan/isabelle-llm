@@ -86,12 +86,16 @@ isabelle proof_pairs -m 32 -T theories.txt -d out
 
 # leaf proofs only (atomic terminal steps, no structural `proof` wrappers):
 isabelle proof_pairs -L -m 32 -T theories.txt -d out_leaf
+
+# exclude proofs containing any 'apply' command:
+isabelle proof_pairs -A -T theories.txt -d out_no_apply
 ```
 
 Output: `<out>/json/<Theory>.json`, plus the raw PIDE exports under
 `<out>/export/`.
 
-Options: `-L` leaf proofs only, `-c N` cap `proof_text_before` to its last N
+Options: `-L` leaf proofs only, `-A` exclude proofs containing any 'apply'
+command, `-c N` cap `proof_text_before` to its last N
 Isabelle symbols (`0` = full), `-l` base override (default: each session's
 parent), `-m` facts per goal (`0` = skip sledgehammer), `-T` theory-list file
 (qualified names, `#` comments), `-d` output dir, `-o` system option override,

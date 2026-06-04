@@ -81,7 +81,8 @@ object Proof_Pairs {
     suggested_facts: List[JSON.T] = Nil,
     proof_block: String = "",
     proof_commands: List[String] = Nil,
-    is_leaf: Boolean = true
+    is_leaf: Boolean = true,
+    has_apply: Boolean = false
   ) {
     def json: JSON.T =
       JSON.Object(
@@ -138,7 +139,7 @@ object Proof_Pairs {
     source: String,
     spans: List[Command_Span.Span],
     offset: Int
-  ): (String, String, List[String], Boolean) = {
+  ): (String, String, List[String], Boolean, Boolean) = {
     val char_offset = Symbol.Text_Chunk(source).decode(offset)
 
     var current = 0
@@ -155,7 +156,7 @@ object Proof_Pairs {
       }
     }
 
-    if (found_idx < 0) (source.substring(0, char_offset min source.length), "", Nil, true)
+    if (found_idx < 0) (source.substring(0, char_offset min source.length), "", Nil, true, false)
     else {
       val history = source.substring(0, found_start)
       val blocks = find_proof_blocks(spans)
@@ -163,16 +164,19 @@ object Proof_Pairs {
       def is_leaf_block(b: Proof_Block): Boolean =
         !blocks.exists(o => o != b && b.start <= o.start && o.stop <= b.stop)
       val containing = blocks.filter(b => b.start <= found_idx && found_idx <= b.stop)
-      val (proof_block, proof_commands, is_leaf) =
-        if (containing.isEmpty) ("", Nil, true)
+      val (proof_block, proof_commands, is_leaf, has_apply) =
+        if (containing.isEmpty) ("", Nil, true, false)
         else {
           val innermost = containing.minBy(b => b.stop - b.start)
           val remaining = spans.slice(found_idx, innermost.stop + 1)
+          val block_spans = spans.slice(innermost.start, innermost.stop + 1)
+          val has_apply = block_spans.exists(_.name == "apply")
           (remaining.map(s => Token.implode(s.content)).mkString,
            remaining.map(s => Token.implode(s.content).trim).filter(_.nonEmpty),
-           is_leaf_block(innermost))
+           is_leaf_block(innermost),
+           has_apply)
         }
-      (history, proof_block, proof_commands, is_leaf)
+      (history, proof_block, proof_commands, is_leaf, has_apply)
     }
   }
 
@@ -202,7 +206,10 @@ object Proof_Pairs {
     }
 
   private def facts_json(facts: List[Proof_Context_Parser.Fact]): List[JSON.T] =
-    facts.map(f => JSON.Object("name" -> f.display_name, "statement" -> f.statement))
+    facts.map(f =>
+      JSON.Object(
+        "name" -> Symbol.decode(f.display_name),
+        "statement" -> Symbol.decode(f.statement)))
 
   /* keep at most the last `max_symbols` Isabelle symbols (0 = unlimited);
      truncates on a symbol boundary so symbol sequences stay intact */
@@ -218,6 +225,7 @@ object Proof_Pairs {
     export_dir: Path,
     json_dir: Path,
     leaf_only: Boolean = false,
+    no_apply: Boolean = false,
     context_symbols: Int = 0,
     progress: Progress = new Progress
   ): Map[String, Int] = {
@@ -237,23 +245,31 @@ object Proof_Pairs {
       if (export_dir.is_dir) File.find_files(export_dir.file, file => file.isFile) else Nil
     val records =
       for { file <- files; raw <- read_export(file) } yield {
-        val (history, block, commands, is_leaf) =
-          if (raw.file_path.isEmpty) ("", "", Nil, true)
+        val (history, block, commands, is_leaf, has_apply) =
+          if (raw.file_path.isEmpty) ("", "", Nil, true, false)
           else
             try { val (src, spans) = parsed(raw.file_path, Long_Name.qualifier(raw.theory))
                   reconstruct(src, spans, raw.offset) }
             catch { case exn: Throwable =>
               progress.echo_warning("reconstruct failed for " + raw.theory +
                 " @" + raw.offset + ": " + exn.getMessage)
-              ("", "", Nil, true) }
-        Record(theory = Long_Name.base_name(raw.theory), line = raw.line, offset = raw.offset,
-          command = raw.command, proof_text_before = limit_context(history, context_symbols),
-          state_before = raw.state, suggested_facts = facts_json(raw.facts), proof_block = block,
-          proof_commands = commands, is_leaf = is_leaf)
+              ("", "", Nil, true, false) }
+        Record(
+          theory = Long_Name.base_name(raw.theory),
+          line = raw.line,
+          offset = raw.offset,
+          command = Symbol.decode(raw.command),
+          proof_text_before = Symbol.decode(limit_context(history, context_symbols)),
+          state_before = Symbol.decode(raw.state),
+          suggested_facts = facts_json(raw.facts),
+          proof_block = Symbol.decode(block),
+          proof_commands = commands.map(Symbol.decode),
+          is_leaf = is_leaf,
+          has_apply = has_apply)
       }
 
     Isabelle_System.make_directory(json_dir)
-    val kept = records.filter(r => !leaf_only || r.is_leaf)
+    val kept = records.filter(r => (!leaf_only || r.is_leaf) && (!no_apply || !r.has_apply))
     val by_theory = kept.groupBy(_.theory)
     for ((theory, recs) <- by_theory) {
       val sorted = recs.sortBy(r => (r.line, r.offset))
@@ -278,6 +294,7 @@ object Proof_Pairs {
     max_facts: Int,
     output_dir: Path,
     leaf_only: Boolean = false,
+    no_apply: Boolean = false,
     context_symbols: Int = 0,
     progress: Progress = new Progress
   ): Unit = {
@@ -292,6 +309,8 @@ object Proof_Pairs {
       logic.getOrElse(structure(session).parent.getOrElse("Pure"))
 
     val by_session = theories.groupBy(Long_Name.qualifier).toList.sortBy(_._1)
+    var grand_total = 0
+    var theories_count = 0
     for ((session, group) <- by_session) {
       val base = base_logic(session)
       progress.echo("=== session " + quote(session) + " on base " + quote(base) +
@@ -299,15 +318,23 @@ object Proof_Pairs {
       val results = extract(options, base, group, max_facts, leaf_only, export_dir, progress = progress)
       if (!results.ok) error("Extraction failed for session " + quote(session) +
         " (rc = " + results.rc + ")")
+
+      progress.echo("Parsing exports for session " + quote(session) +
+        (if (leaf_only) " (leaf proofs only)" else "") +
+        (if (no_apply) " (excluding apply proofs)" else "") + " ...")
+      val counts = parse(options, export_dir, json_dir,
+        leaf_only = leaf_only, no_apply = no_apply, context_symbols = context_symbols, progress = progress)
+      val total = counts.valuesIterator.sum
+      grand_total += total
+      theories_count += counts.size
+      for ((theory, n) <- counts.toList.sortBy(-_._2)) {
+        progress.echo("Wrote " + n + " proof-step records for " + theory + " -> " + json_dir)
+      }
+
+      if (export_dir.is_dir) Isabelle_System.rm_tree(export_dir)
     }
 
-    progress.echo("Parsing exports from " + export_dir +
-      (if (leaf_only) " (leaf proofs only)" else "") + " ...")
-    val counts = parse(options, export_dir, json_dir,
-      leaf_only = leaf_only, context_symbols = context_symbols, progress = progress)
-    val total = counts.valuesIterator.sum
-    progress.echo("Wrote " + total + " proof-step records across " +
-      counts.size + " theories -> " + json_dir)
-    for ((theory, n) <- counts.toList.sortBy(-_._2)) progress.echo("  " + n + "  " + theory)
+    progress.echo("Finished! Wrote a grand total of " + grand_total + " proof-step records across " +
+      theories_count + " theories -> " + json_dir)
   }
 }
