@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CREATE_HOST="${CREATE_HOST:-create}"
+CREATE_HOST="${CREATE_HOST:-create-mx}"
 CREATE_IDENTITY="${CREATE_IDENTITY:-$HOME/.ssh/create_hpc_rsa}"
 MODE="queue"
 SINCE="${SQUEUE_ME_SINCE:-now-7days}"

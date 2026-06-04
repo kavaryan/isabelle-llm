@@ -1,0 +1,16 @@
+{
+  "chars_per_token": 3.5,
+  "completion_field": "completion",
+  "format": "jsonl",
+  "input_dir": "/home/me/wr/ai4math/copilots-isabelle/isabelle-llm/extractor/proof_extractor_out/json",
+  "max_seq_length": 2048,
+  "num_examples": 2483,
+  "num_test_examples": 497,
+  "num_train_examples": 1986,
+  "num_truncated_examples": 9,
+  "prompt_field": "prompt",
+  "seed": 42,
+  "template": "/home/me/wr/ai4math/copilots-isabelle/isabelle-llm/sft/prompt_jinja2_template.py",
+  "test_ratio": 0.2,
+  "text_field": "text"
+}

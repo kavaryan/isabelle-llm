@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-CREATE_HOST="${CREATE_HOST:-create}"
+CREATE_HOST="${CREATE_HOST:-create-mx}"
 CREATE_IDENTITY="${CREATE_IDENTITY:-$HOME/.ssh/create_hpc_rsa}"
 REMOTE_DIR="${CREATE_REMOTE_DIR:-}"
 SOURCE_DIR="$SCRIPT_DIR"
@@ -178,7 +178,8 @@ mkdir -p "$remote_dir"
 printf '%s' "$remote_dir"
 REMOTE
 )"
-  rsync -avz -e "ssh -i $CREATE_IDENTITY -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=60" \
+  rsync -avz --exclude='__pycache__/' --exclude='*.pyc' \
+    -e "ssh -i $CREATE_IDENTITY -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=60" \
     "$SOURCE_DIR/" "$CREATE_HOST:$remote_dir/"
 fi
 

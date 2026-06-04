@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 import argparse
+import inspect
 import json
 import os
 from pathlib import Path
 
 import torch
-from datasets import load_dataset
 from peft import LoraConfig, PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
+
+from sft_chat_stats import apply_chat_template_to_prompt_completion_dataset, load_sft_split
 
 
 def parse_args() -> argparse.Namespace:
@@ -17,6 +19,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", required=True, help="Dataset path or Hugging Face dataset ID.")
     parser.add_argument("--dataset-config", default="", help="Optional dataset config/subset.")
     parser.add_argument("--split", default="train", help="Dataset split.")
+    parser.add_argument("--eval-split", default="", help="Optional eval split for trainer eval_loss logging.")
+    parser.add_argument("--max-eval-samples", type=int, default=-1, help="Maximum examples for trainer eval_loss.")
     parser.add_argument("--output-dir", required=True, help="Directory for trainer output.")
     parser.add_argument("--merged-output-dir", required=True, help="Directory for merged vLLM-ready checkpoint.")
     parser.add_argument("--max-train-samples", type=int, default=2, help="Maximum examples to train on.")
@@ -24,7 +28,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--solution-field", default="solution", help="Solution/response field.")
     parser.add_argument("--answer-field", default="answer", help="Optional final-answer field.")
     parser.add_argument("--text-field", default="", help="Use an existing single text field instead of formatting fields.")
-    parser.add_argument("--max-seq-length", type=int, default=2048)
+    parser.add_argument(
+        "--completion-only-loss",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="For prompt/completion datasets, train only on completion tokens.",
+    )
+    parser.add_argument("--max-seq-length", type=int, default=3072)
     parser.add_argument("--epochs", type=float, default=1.0)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--per-device-train-batch-size", type=int, default=1)
@@ -42,33 +52,31 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_train_dataset(args: argparse.Namespace):
-    if args.dataset_config:
-        dataset = load_dataset(args.dataset, args.dataset_config, split=args.split)
-    else:
-        dataset = load_dataset(args.dataset, split=args.split)
+    return load_sft_split(
+        args.dataset,
+        args.dataset_config,
+        args.split,
+        limit=args.max_train_samples,
+        question_field=args.question_field,
+        solution_field=args.solution_field,
+        answer_field=args.answer_field,
+        text_field=args.text_field,
+    )
 
-    if args.max_train_samples >= 0:
-        dataset = dataset.select(range(min(args.max_train_samples, len(dataset))))
 
-    if args.text_field:
-        if args.text_field not in dataset.column_names:
-            raise ValueError(f"text field {args.text_field!r} not present in dataset columns {dataset.column_names}")
-        return dataset
-
-    required = [args.question_field, args.solution_field]
-    missing = [field for field in required if field not in dataset.column_names]
-    if missing:
-        raise ValueError(f"missing dataset fields {missing}; available columns: {dataset.column_names}")
-
-    def format_example(example):
-        question = str(example[args.question_field]).strip()
-        solution = str(example[args.solution_field]).strip()
-        answer = str(example.get(args.answer_field, "")).strip() if args.answer_field else ""
-        if answer and answer not in solution[-200:]:
-            solution = f"{solution}\n\nFinal answer: {answer}"
-        return {"text": f"Question:\n{question}\n\nAnswer:\n{solution}"}
-
-    return dataset.map(format_example, remove_columns=dataset.column_names)
+def load_eval_dataset(args: argparse.Namespace):
+    if not args.eval_split:
+        return None, False
+    return load_sft_split(
+        args.dataset,
+        args.dataset_config,
+        args.eval_split,
+        limit=args.max_eval_samples,
+        question_field=args.question_field,
+        solution_field=args.solution_field,
+        answer_field=args.answer_field,
+        text_field=args.text_field,
+    )
 
 
 def save_json(path: Path, payload: dict) -> None:
@@ -78,6 +86,15 @@ def save_json(path: Path, payload: dict) -> None:
         handle.write("\n")
 
 
+def make_sft_config(**kwargs) -> SFTConfig:
+    supported = inspect.signature(SFTConfig).parameters
+    filtered = {key: value for key, value in kwargs.items() if key in supported}
+    dropped = sorted(set(kwargs) - set(filtered))
+    if dropped:
+        print(f"Warning: installed TRL SFTConfig does not support {dropped}; ignoring them", flush=True)
+    return SFTConfig(**filtered)
+
+
 def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_dir).expanduser()
@@ -85,10 +102,21 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     merged_output_dir.mkdir(parents=True, exist_ok=True)
 
-    train_dataset = load_train_dataset(args)
+    train_dataset, uses_prompt_completion = load_train_dataset(args)
+    eval_dataset, eval_uses_prompt_completion = load_eval_dataset(args)
+    if eval_dataset is not None and eval_uses_prompt_completion != uses_prompt_completion:
+        raise ValueError("train and eval splits must use the same formatting mode")
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    if uses_prompt_completion:
+        train_dataset, _ = apply_chat_template_to_prompt_completion_dataset(
+            train_dataset, tokenizer, args.max_seq_length, args.split
+        )
+        if eval_dataset is not None:
+            eval_dataset, _ = apply_chat_template_to_prompt_completion_dataset(
+                eval_dataset, tokenizer, args.max_seq_length, args.eval_split
+            )
 
     dtype = torch.bfloat16 if args.bf16 else torch.float16 if args.fp16 else "auto"
     model = AutoModelForCausalLM.from_pretrained(
@@ -110,9 +138,10 @@ def main() -> None:
             target_modules="all-linear",
         )
 
-    training_args = SFTConfig(
+    training_args = make_sft_config(
         output_dir=str(output_dir),
         dataset_text_field=args.text_field or "text",
+        completion_only_loss=args.completion_only_loss if uses_prompt_completion else None,
         max_length=args.max_seq_length,
         packing=False,
         num_train_epochs=args.epochs,
@@ -122,6 +151,8 @@ def main() -> None:
         lr_scheduler_type="cosine",
         warmup_ratio=0.0,
         logging_steps=1,
+        eval_strategy="epoch" if eval_dataset is not None else "no",
+        evaluation_strategy="epoch" if eval_dataset is not None else "no",
         save_strategy="no",
         report_to=args.report_to,
         run_name=args.run_name or None,
@@ -136,6 +167,7 @@ def main() -> None:
         model=model,
         args=training_args,
         train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         processing_class=tokenizer,
         peft_config=peft_config,
     )
@@ -169,7 +201,9 @@ def main() -> None:
             "dataset": args.dataset,
             "dataset_config": args.dataset_config,
             "split": args.split,
+            "eval_split": args.eval_split,
             "num_train_examples": len(train_dataset),
+            "num_eval_examples": len(eval_dataset) if eval_dataset is not None else 0,
             "full_finetune": args.full_finetune,
             "trainer_output_dir": str(output_dir),
             "merged_output_dir": str(merged_output_dir),

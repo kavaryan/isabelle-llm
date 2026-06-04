@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MODEL_ID=""
 DATASET_ID=""
 MAX_TRAIN_SAMPLES=""
@@ -9,8 +10,8 @@ SUBMIT_ARGS=()
 SBATCH_ARGS=()
 EXPORT_VARS=()
 DEFAULT_MODEL_ID="Qwen/Qwen3-0.6B"
-DEFAULT_DATASET_ID="GAIR/LIMO"
-DEFAULT_MAX_TRAIN_SAMPLES="2"
+DEFAULT_DATASET_ID=""
+DEFAULT_MAX_TRAIN_SAMPLES="-1"
 
 usage() {
   cat <<'USAGE'
@@ -19,15 +20,16 @@ Usage:
 
 Examples:
   submit_finetune_model.sh
-  submit_finetune_model.sh Qwen/Qwen3-0.6B GAIR/LIMO 2
-  submit_finetune_model.sh --epochs 2 --learning-rate 1e-4 Qwen/Qwen3-0.6B GAIR/LIMO 8
-  submit_finetune_model.sh --gpu-profile l40s Qwen/Qwen3-0.6B GAIR/LIMO 2
+  submit_finetune_model.sh Qwen/Qwen3-0.6B ~/ai4math/copilots-isabelle/isabelle-llm/sft/sft-data -1
+  submit_finetune_model.sh --epochs 1 --gpu-profile l40s
+  submit_finetune_model.sh --smoke-test --monitor
   submit_finetune_model.sh --model-path '~/ai4math/models/Qwen3-0.6B'
-  submit_finetune_model.sh --skip-vllm-smoke
+  submit_finetune_model.sh --skip-eval-after-train
   submit_finetune_model.sh -- --time=04:00:00
 
-Defaults fine-tune Qwen 0.6B on the first 2 examples from GAIR/LIMO, the dataset
-released for arXiv:2502.03387.
+Defaults fine-tune Qwen 0.6B for 1 epoch on the script-relative Isabelle SFT
+train split, then evaluate the merged checkpoint on the Isabelle SFT test split
+and log the summary/table to W&B when wandb.conf.sh provides WANDB_API_KEY.
 
 Options:
   --gpu-profile NAME        Use a100, l40s, or b200. Also passes matching --constraint.
@@ -39,7 +41,12 @@ Options:
   --solution-field NAME     Dataset solution field. Default: solution.
   --answer-field NAME       Dataset answer field. Default: answer.
   --text-field NAME         Use preformatted text field instead of question/solution formatting.
-  --max-train-samples N     Number of examples to train on.
+  --max-train-samples N     Number of examples to train on. Use -1 for all.
+  --eval-dataset ID         Evaluation dataset. Default: same as training dataset.
+  --eval-split NAME         Evaluation split. Default: test.
+  --eval-num-problems N     Number of eval examples. Use -1 for all. Default: -1.
+  --smoke-test              Generate 10 train / 2 test examples and request 45 min.
+  --skip-eval-after-train   Skip post-training vLLM evaluation.
   --output-root DIR         Root directory for finetune outputs.
   --train-output-dir DIR    Explicit trainer output directory.
   --merged-model-dir DIR    Explicit merged checkpoint directory.
@@ -98,6 +105,15 @@ while (($#)); do
     --answer-field) need_value "$@"; add_export ANSWER_FIELD "$2"; shift 2 ;;
     --text-field) need_value "$@"; add_export TEXT_FIELD "$2"; shift 2 ;;
     --max-train-samples) need_value "$@"; MAX_TRAIN_SAMPLES="$2"; shift 2 ;;
+    --eval-dataset) need_value "$@"; add_export EVAL_DATASET_ID "$2"; shift 2 ;;
+    --eval-split) need_value "$@"; add_export EVAL_DATASET_SPLIT "$2"; shift 2 ;;
+    --eval-num-problems) need_value "$@"; add_export EVAL_NUM_PROBLEMS "$2"; shift 2 ;;
+    --smoke-test)
+      add_export SMOKE_TEST 1
+      add_export EVAL_NUM_PROBLEMS 2
+      SBATCH_ARGS+=("--time=00:45:00")
+      shift
+      ;;
     --output-root) need_value "$@"; add_export OUTPUT_ROOT "$2"; shift 2 ;;
     --train-output-dir) need_value "$@"; add_export TRAIN_OUTPUT_DIR "$2"; shift 2 ;;
     --merged-model-dir) need_value "$@"; add_export MERGED_MODEL_DIR "$2"; shift 2 ;;
@@ -109,6 +125,7 @@ while (($#)); do
     --full-finetune) add_export FULL_FINETUNE 1; shift ;;
     --wandb-run-name) need_value "$@"; add_export WANDB_RUN_NAME "$2"; shift 2 ;;
     --no-wandb) add_export DISABLE_WANDB 1; shift ;;
+    --skip-eval-after-train) add_export RUN_EVAL_AFTER_TRAIN 0; shift ;;
     --skip-vllm-smoke) add_export SKIP_VLLM_SMOKE 1; shift ;;
     --monitor)
       submit_script="$SCRIPT_DIR/submit_and_monitor.sh"
@@ -157,16 +174,20 @@ MODEL_ID="${MODEL_ID:-$DEFAULT_MODEL_ID}"
 DATASET_ID="${DATASET_ID:-$DEFAULT_DATASET_ID}"
 MAX_TRAIN_SAMPLES="${MAX_TRAIN_SAMPLES:-$DEFAULT_MAX_TRAIN_SAMPLES}"
 
-if ! [[ "$MAX_TRAIN_SAMPLES" =~ ^[0-9]+$ ]]; then
-  echo "error: max_train_samples must be a non-negative integer" >&2
+if ! [[ "$MAX_TRAIN_SAMPLES" =~ ^-?[0-9]+$ ]]; then
+  echo "error: max_train_samples must be an integer; use -1 for all examples" >&2
   exit 2
 fi
 
-EXPORT_VARS=("MODEL_ID=$MODEL_ID" "DATASET_ID=$DATASET_ID" "MAX_TRAIN_SAMPLES=$MAX_TRAIN_SAMPLES" "${EXPORT_VARS[@]}")
+base_exports=("MODEL_ID=$MODEL_ID" "MAX_TRAIN_SAMPLES=$MAX_TRAIN_SAMPLES")
+if [[ -n "$DATASET_ID" ]]; then
+  base_exports+=("DATASET_ID=$DATASET_ID")
+fi
+EXPORT_VARS=("${base_exports[@]}" "${EXPORT_VARS[@]}")
 export_arg="ALL"
 for export_var in "${EXPORT_VARS[@]}"; do
   export_arg+=",$export_var"
 done
 SBATCH_ARGS=("--export=$export_arg" "${SBATCH_ARGS[@]}")
 
-exec "$submit_script" "${SUBMIT_ARGS[@]}" finetune_model_trl.sbatch -- "${SBATCH_ARGS[@]}"
+exec "$submit_script" --source-dir "$SOURCE_ROOT" "${SUBMIT_ARGS[@]}" slurm/finetune_model_trl.sbatch -- "${SBATCH_ARGS[@]}"
