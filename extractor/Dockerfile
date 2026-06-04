@@ -13,9 +13,9 @@ WORKDIR /home/isabelle/extractor
 
 RUN isabelle components -u /home/isabelle/extractor \
     && isabelle scala_build \
-    && isabelle proof_pairs -? 2>&1 | grep -q "Usage: isabelle proof_pairs"
+    && isabelle proof_extractor -? 2>&1 | grep -q "Usage: isabelle proof_extractor"
 
 VOLUME ["/out"]
 USER root
 ENV HOME=/home/isabelle
-ENTRYPOINT ["isabelle", "proof_pairs", "-d", "/out"]
+ENTRYPOINT ["isabelle", "proof_extractor", "-d", "/out"]

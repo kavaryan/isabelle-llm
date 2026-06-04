@@ -1,4 +1,4 @@
-/*  Title:      proof_pairs/src/proof_pairs.scala
+/*  Title:      extractor/src/proof_extractor.scala
     Author:     isabelle-llm
 
 Adhoc proof-pair extraction built on top of the official `isabelle
@@ -6,7 +6,7 @@ process_theories` tool logic, reading directly from the SQLite database.
 
 Phase 1 (extract): compose an adhoc "Draft" session (via custom build)
 that re-elaborates the requested theories, with a custom build presentation
-hook injected as source files. The hook (proof_pairs_hook.ML) fires on the
+hook injected as source files. The hook (proof_extractor_hook.ML) fires on the
 requested theories regardless of session qualifier. For each proof step it
 exports a goal-state node and, optionally, MePo-suggested facts, produced by the
 shared Proof_Context_Exporter.
