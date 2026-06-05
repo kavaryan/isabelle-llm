@@ -21,7 +21,10 @@ For downstream fine-tuning, render the raw prompt/completion split first. The mo
 
 
 ## TODO
-- [ ] use ssh multiplexing to speed up interacting with HPC & montior script shows a better summary with -f on out and err files
+- [ ] update montior script shows a better summary with -f on out and err files
+- [ ] pretraining (i.e., before training) loss and vllm?
+
+- [x] use ssh multiplexing to speed up interacting with HPC
 For Host:
 Host create-mx
     ControlMaster auto

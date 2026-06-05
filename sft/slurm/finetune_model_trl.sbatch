@@ -94,7 +94,9 @@ esac
 VENV_DIR="${VENV_DIR:-$SCRATCH_ROOT/.venvs/trl-finetune-$GPU_PROFILE}"
 REBUILD_ENV="${REBUILD_ENV:-0}"
 ENV_READY_FILE="$VENV_DIR/.cpu_test_deps_ready_${GPU_PROFILE}_${TORCH_VERSION}_${VLLM_VERSION}"
-RUN_NAME="${RUN_NAME:-$(printf '%s_%s' "${MODEL_ID#*/}" "${DATASET_ID#*/}" | tr '/: ' '___' | tr -cd '[:alnum:]_.-')_first${MAX_TRAIN_SAMPLES}_${SLURM_JOB_ID:-manual}}"
+DATASET_LABEL="$(basename "$DATASET_ID")"
+RUN_TIMESTAMP="${RUN_TIMESTAMP:-$(date +%Y%m%d_%H%M%S)}"
+RUN_NAME="${RUN_NAME:-$(printf '%s_%s_%s' "${MODEL_ID#*/}" "$DATASET_LABEL" "$RUN_TIMESTAMP" | tr '/: ' '___' | tr -cd '[:alnum:]_.-')_first${MAX_TRAIN_SAMPLES}_${SLURM_JOB_ID:-manual}}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$HOME/ai4math/finetunes}"
 TRAIN_OUTPUT_DIR="${TRAIN_OUTPUT_DIR:-$OUTPUT_ROOT/$RUN_NAME/adapter_or_full}"
 MERGED_MODEL_DIR="${MERGED_MODEL_DIR:-$OUTPUT_ROOT/$RUN_NAME/merged}"
@@ -464,7 +466,10 @@ if os.environ.get("WANDB_MODE") != "disabled" and os.environ.get("WANDB_API_KEY"
     table = wandb.Table(columns=["index", "theory", "line", "gold", "prediction", "exact_match"])
     for row in rows:
         table.add_data(row["index"], row["theory"], row["line"], row["gold"], row["prediction"], row["exact_match"])
-    wandb.log({"eval/results": table})
+    try:
+        wandb.log({"eval/results": table})
+    except Exception as exc:
+        print(f"Warning: failed to log W&B eval table: {exc}", flush=True)
     run.finish()
 
 print("SUMMARY " + json.dumps(summary, ensure_ascii=False), flush=True)
