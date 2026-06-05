@@ -3,6 +3,7 @@ import argparse
 import inspect
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -43,6 +44,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
     parser.add_argument("--full-finetune", action="store_true", help="Disable LoRA and train all weights.")
+    parser.add_argument(
+        "--baseline-eval-before-train",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Evaluate the raw base model on train/eval splits before training and log to the same run.",
+    )
     parser.add_argument("--bf16", action="store_true")
     parser.add_argument("--fp16", action="store_true")
     parser.add_argument("--report-to", default=os.environ.get("REPORT_TO", "none"))
@@ -93,6 +100,12 @@ def make_sft_config(**kwargs) -> SFTConfig:
     if dropped:
         print(f"Warning: installed TRL SFTConfig does not support {dropped}; ignoring them", flush=True)
     return SFTConfig(**filtered)
+
+
+def disabled_adapter_context(model):
+    if isinstance(model, PeftModel) and hasattr(model, "disable_adapter"):
+        return model.disable_adapter()
+    return nullcontext()
 
 
 def main() -> None:
@@ -159,7 +172,7 @@ def main() -> None:
         bf16=args.bf16,
         fp16=args.fp16,
         gradient_checkpointing=True,
-        remove_unused_columns=True,
+        remove_unused_columns=False,
         seed=args.seed,
     )
 
@@ -171,6 +184,25 @@ def main() -> None:
         processing_class=tokenizer,
         peft_config=peft_config,
     )
+
+    baseline_metrics: dict[str, dict[str, float]] = {}
+    if args.baseline_eval_before_train:
+        print("Running baseline evaluation before training", flush=True)
+        with disabled_adapter_context(trainer.model):
+            baseline_train_metrics = trainer.evaluate(
+                eval_dataset=trainer.train_dataset,
+                metric_key_prefix="base_train",
+            )
+            baseline_metrics["train"] = baseline_train_metrics
+            print(f"BASELINE train {json.dumps(baseline_train_metrics, sort_keys=True)}", flush=True)
+            if eval_dataset is not None:
+                baseline_eval_metrics = trainer.evaluate(
+                    eval_dataset=trainer.eval_dataset,
+                    metric_key_prefix="base_eval",
+                )
+                baseline_metrics["eval"] = baseline_eval_metrics
+                print(f"BASELINE eval {json.dumps(baseline_eval_metrics, sort_keys=True)}", flush=True)
+
     trainer.train()
     trainer.save_model(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
@@ -204,6 +236,8 @@ def main() -> None:
             "eval_split": args.eval_split,
             "num_train_examples": len(train_dataset),
             "num_eval_examples": len(eval_dataset) if eval_dataset is not None else 0,
+            "baseline_eval_before_train": args.baseline_eval_before_train,
+            "baseline_metrics": baseline_metrics,
             "full_finetune": args.full_finetune,
             "trainer_output_dir": str(output_dir),
             "merged_output_dir": str(merged_output_dir),

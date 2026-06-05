@@ -12,7 +12,7 @@ This repository provides tools and plugins to integrate Large Language Models (L
 
 ## Supervised Fine-Tuning (SFT) Template
 
-Prompt templates format extracted proof pairs for training. The standard template is located at [sft/prompt_jinja2_template.txt](sft/prompt_jinja2_template.txt):
+Prompt templates format extracted proof pairs for training. The standard non-thinking template is located at [sft/non_thinking_prompt.py](sft/non_thinking_prompt.py) and defines `PROMPT_TEMPLATE` plus `COMPLETION_TEMPLATE`:
 
 ```jinja2
 You are an expert Isabelle/HOL proof assistant. Complete the current subgoal in the unfinished proof using a single one-liner command sequence.

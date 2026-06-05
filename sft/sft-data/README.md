@@ -1,7 +1,7 @@
 # Isabelle Proof SFT Data
 
 This directory contains JSONL splits generated from `extractor/proof_extractor_out/json`
-with `../prompt_jinja2_template.py`.
+with `../non_thinking_prompt.py`.
 
 Regenerate the split with:
 

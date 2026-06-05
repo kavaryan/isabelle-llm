@@ -4,7 +4,7 @@ This directory contains resources for formatting extracted Isabelle proof-step d
 
 ## Contents
 
-*   [prompt_jinja2_template.py](prompt_jinja2_template.py) — Defines `PROMPT_TEMPLATE` and `COMPLETION_TEMPLATE` Jinja2 strings used to format exported proof-pair JSON objects.
+*   [non_thinking_prompt.py](non_thinking_prompt.py) — Defines `PROMPT_TEMPLATE` and `COMPLETION_TEMPLATE` Jinja2 strings used to format exported proof-pair JSON objects.
 
 ## Template Variables
 
@@ -19,10 +19,20 @@ The extractor outputs JSON files where each proof record contains the following 
 
 For downstream fine-tuning, render the raw prompt/completion split first. The model-specific tokenizer chat template should be applied by the training script for the exact base model being fine-tuned.
 
+`slurm/train_model_trl.py` evaluates the raw base model on the formatted train
+and eval splits before training by default. These baseline losses are logged to
+the same W&B run with the `base_train_*` and `base_eval_*` metric prefixes, then
+normal SFT training continues.
+
 
 ## TODO
 - [ ] update montior script shows a better summary with -f on out and err files
+
 - [ ] pretraining (i.e., before training) loss and vllm?
+- [ ] experiment with a thinking prompt
+- [ ] experiment with a larger model
+
+- [ ] connect the output to the Isabelle
 
 - [x] use ssh multiplexing to speed up interacting with HPC
 For Host:

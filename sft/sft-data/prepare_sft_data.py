@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--template",
         type=Path,
-        default=repo_relative("sft/prompt_jinja2_template.py"),
+        default=repo_relative("sft/non_thinking_prompt.py"),
         help="Python template file defining PROMPT_TEMPLATE and COMPLETION_TEMPLATE.",
     )
     parser.add_argument(

@@ -44,6 +44,7 @@ TEXT_FIELD="${TEXT_FIELD:-}"
 PREPARE_ISABELLE_SFT_DATA="${PREPARE_ISABELLE_SFT_DATA:-1}"
 SMOKE_TEST="${SMOKE_TEST:-0}"
 RUN_EVAL_AFTER_TRAIN="${RUN_EVAL_AFTER_TRAIN:-1}"
+BASELINE_EVAL_BEFORE_TRAIN="${BASELINE_EVAL_BEFORE_TRAIN:-1}"
 
 SCRATCH_ROOT="${SCRATCH:-/scratch/users/$USER}"
 PREPARE_SFT_DATA_SCRIPT="${PREPARE_SFT_DATA_SCRIPT:-$DATASET_ID/prepare_sft_data.py}"
@@ -129,6 +130,7 @@ echo "Model ID: $MODEL_ID"
 echo "Model path: $MODEL_PATH"
 echo "Dataset: $DATASET_ID config=${DATASET_CONFIG:-none} split=$DATASET_SPLIT first $MAX_TRAIN_SAMPLES"
 echo "Epochs: $NUM_EPOCHS"
+echo "Baseline loss before train: $BASELINE_EVAL_BEFORE_TRAIN"
 if [[ "$SMOKE_TEST" == "1" ]]; then
   echo "Smoke test: enabled (10 train examples, 2 test examples)"
   echo "Estimated runtime: env build 20-45 min if cold, train/eval 3-8 min if the environment and model cache already exist; 45 min walltime is intended for warm-cache smoke tests."
@@ -330,6 +332,9 @@ fi
 if [[ "$USE_FP16" == "1" ]]; then
   train_args+=(--fp16)
 fi
+if [[ "$BASELINE_EVAL_BEFORE_TRAIN" != "1" ]]; then
+  train_args+=(--no-baseline-eval-before-train)
+fi
 
 python "$SCRIPT_DIR/train_model_trl.py" "${train_args[@]}"
 
@@ -339,6 +344,7 @@ if [[ "$RUN_EVAL_AFTER_TRAIN" == "1" ]]; then
 import json
 import math
 import os
+import re
 import time
 import gc
 
@@ -418,20 +424,32 @@ for start in range(0, len(prompts), batch_size):
     outputs.extend(llm.generate(prompts[start:end], sampling))
     print(f"Eval batch {start // batch_size + 1} complete", flush=True)
 
+def strip_empty_think_prefix(text):
+    match = re.match(r"^\s*<think>(.*?)</think>\s*", text, flags=re.DOTALL)
+    if match and not match.group(1).strip():
+        return text[match.end():].strip()
+    return text
+
 rows = []
 exact = 0
+normalized_exact = 0
 for index, (example, output) in enumerate(zip(dataset, outputs)):
     prediction = output.outputs[0].text.strip()
     gold = str(example["completion"]).strip()
+    normalized_prediction = strip_empty_think_prefix(prediction)
     is_exact = prediction == gold
+    is_normalized_exact = normalized_prediction == gold
     exact += int(is_exact)
+    normalized_exact += int(is_normalized_exact)
     row = {
         "index": index,
         "theory": example.get("theory", ""),
         "line": example.get("line"),
         "gold": gold,
         "prediction": prediction,
+        "normalized_prediction": normalized_prediction,
         "exact_match": is_exact,
+        "normalized_exact_match": is_normalized_exact,
     }
     rows.append(row)
     print(json.dumps(row, ensure_ascii=False), flush=True)
@@ -444,7 +462,10 @@ summary = {
     "eval/num_examples": len(prompts),
     "eval/batch_size": batch_size,
     "eval/exact": exact,
-    "eval/exact_match": exact / limit if limit else 0.0,
+    "eval/exact_match": exact / len(prompts) if prompts else 0.0,
+    "eval/normalized_exact": normalized_exact,
+    "eval/normalized_exact_match": normalized_exact / len(prompts) if prompts else 0.0,
+    "eval/normalization": "strip_empty_leading_think_block",
     "eval/runtime_seconds": time.time() - started,
 }
 
@@ -463,9 +484,29 @@ if os.environ.get("WANDB_MODE") != "disabled" and os.environ.get("WANDB_API_KEY"
         job_type="eval",
     )
     wandb.log(summary)
-    table = wandb.Table(columns=["index", "theory", "line", "gold", "prediction", "exact_match"])
+    table = wandb.Table(
+        columns=[
+            "index",
+            "theory",
+            "line",
+            "gold",
+            "prediction",
+            "normalized_prediction",
+            "exact_match",
+            "normalized_exact_match",
+        ]
+    )
     for row in rows:
-        table.add_data(row["index"], row["theory"], row["line"], row["gold"], row["prediction"], row["exact_match"])
+        table.add_data(
+            row["index"],
+            row["theory"],
+            row["line"],
+            row["gold"],
+            row["prediction"],
+            row["normalized_prediction"],
+            row["exact_match"],
+            row["normalized_exact_match"],
+        )
     try:
         wandb.log({"eval/results": table})
     except Exception as exc:
