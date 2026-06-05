@@ -24,12 +24,21 @@ and eval splits before training by default. These baseline losses are logged to
 the same W&B run with the `base_train_*` and `base_eval_*` metric prefixes, then
 normal SFT training continues.
 
+## Tentative results (Maxi's dataset, random 80/20 train/test split)
+                                pass@1                  pass@16
+Base model (Qwen/Qwen3-0.6B)    0/497                   0/497
+Fine-tuned                       123/497 = 24.7%        188/497 = 37.8%          
+
+
 
 ## TODO
 - [ ] update montior script shows a better summary with -f on out and err files
 
-- [ ] pretraining (i.e., before training) loss and vllm?
+- [x] pretraining (i.e., before training) loss and vllm?
 - [ ] experiment with a thinking prompt
+- [ ] experiment with pass@N 
+    - [ ] agentic evaluation (instead of pass@N, pass the last one to the model to improve with isabelle's output)
+    - [ ] what about agentic training?
 - [ ] experiment with a larger model
 
 - [ ] connect the output to the Isabelle

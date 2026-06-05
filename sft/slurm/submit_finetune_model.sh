@@ -45,6 +45,11 @@ Options:
   --eval-dataset ID         Evaluation dataset. Default: same as training dataset.
   --eval-split NAME         Evaluation split. Default: test.
   --eval-num-problems N     Number of eval examples. Use -1 for all. Default: -1.
+  --eval-only               Skip training and run only vLLM evaluation.
+  --eval-model-dir DIR      Model/checkpoint directory for --eval-only vLLM evaluation.
+  --eval-pass-n N           Number of vLLM samples per problem for pass@N.
+  --eval-temperature X      Sampling temperature for vLLM evaluation.
+  --eval-batch-size N       vLLM eval prompt batch size. Default: 16.
   --smoke-test              Generate 10 train / 2 test examples and request 45 min.
   --skip-eval-after-train   Skip post-training vLLM evaluation.
   --output-root DIR         Root directory for finetune outputs.
@@ -108,6 +113,11 @@ while (($#)); do
     --eval-dataset) need_value "$@"; add_export EVAL_DATASET_ID "$2"; shift 2 ;;
     --eval-split) need_value "$@"; add_export EVAL_DATASET_SPLIT "$2"; shift 2 ;;
     --eval-num-problems) need_value "$@"; add_export EVAL_NUM_PROBLEMS "$2"; shift 2 ;;
+    --eval-only) add_export EVAL_ONLY 1; add_export RUN_EVAL_AFTER_TRAIN 1; add_export SKIP_VLLM_SMOKE 1; shift ;;
+    --eval-model-dir) need_value "$@"; add_export EVAL_MODEL_DIR "$2"; shift 2 ;;
+    --eval-pass-n) need_value "$@"; add_export EVAL_PASS_N "$2"; shift 2 ;;
+    --eval-temperature) need_value "$@"; add_export EVAL_TEMPERATURE "$2"; shift 2 ;;
+    --eval-batch-size) need_value "$@"; add_export EVAL_BATCH_SIZE "$2"; shift 2 ;;
     --smoke-test)
       add_export SMOKE_TEST 1
       add_export EVAL_NUM_PROBLEMS 2

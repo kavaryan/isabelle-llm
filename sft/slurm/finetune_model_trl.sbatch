@@ -45,6 +45,7 @@ PREPARE_ISABELLE_SFT_DATA="${PREPARE_ISABELLE_SFT_DATA:-1}"
 SMOKE_TEST="${SMOKE_TEST:-0}"
 RUN_EVAL_AFTER_TRAIN="${RUN_EVAL_AFTER_TRAIN:-1}"
 BASELINE_EVAL_BEFORE_TRAIN="${BASELINE_EVAL_BEFORE_TRAIN:-1}"
+EVAL_ONLY="${EVAL_ONLY:-0}"
 
 SCRATCH_ROOT="${SCRATCH:-/scratch/users/$USER}"
 PREPARE_SFT_DATA_SCRIPT="${PREPARE_SFT_DATA_SCRIPT:-$DATASET_ID/prepare_sft_data.py}"
@@ -64,6 +65,8 @@ else
 fi
 EVAL_MAX_TOKENS="${EVAL_MAX_TOKENS:-128}"
 EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-16}"
+EVAL_PASS_N="${EVAL_PASS_N:-1}"
+EVAL_TEMPERATURE="${EVAL_TEMPERATURE:-}"
 GPU_PROFILE="${GPU_PROFILE:-l40s}"
 case "$GPU_PROFILE" in
   a100|l40s)
@@ -144,7 +147,7 @@ echo "Started: $(date -Is)"
 
 mkdir -p "$OUTPUT_ROOT" "$RESULTS_DIR" "$HF_HOME" "$PIP_CACHE_DIR" "$(dirname "$VENV_DIR")"
 export SOURCE_DATASET_ID DATASET_ID MERGED_MODEL_DIR VLLM_MAX_MODEL_LEN
-export EVAL_DATASET_ID EVAL_DATASET_CONFIG EVAL_DATASET_SPLIT EVAL_NUM_PROBLEMS EVAL_MAX_TOKENS EVAL_BATCH_SIZE EVAL_RESULTS_FILE
+export EVAL_DATASET_ID EVAL_DATASET_CONFIG EVAL_DATASET_SPLIT EVAL_NUM_PROBLEMS EVAL_MAX_TOKENS EVAL_BATCH_SIZE EVAL_RESULTS_FILE EVAL_MODEL_DIR EVAL_PASS_N EVAL_TEMPERATURE
 export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 WANDB_CONF="${WANDB_CONF:-$SCRIPT_DIR/wandb.conf.sh}"
@@ -336,7 +339,11 @@ if [[ "$BASELINE_EVAL_BEFORE_TRAIN" != "1" ]]; then
   train_args+=(--no-baseline-eval-before-train)
 fi
 
-python "$SCRIPT_DIR/train_model_trl.py" "${train_args[@]}"
+if [[ "$EVAL_ONLY" == "1" ]]; then
+  echo "Eval only: skipping training"
+else
+  python "$SCRIPT_DIR/train_model_trl.py" "${train_args[@]}"
+fi
 
 if [[ "$RUN_EVAL_AFTER_TRAIN" == "1" ]]; then
   echo "Evaluating merged checkpoint on $EVAL_DATASET_ID split=$EVAL_DATASET_SPLIT with vLLM"
@@ -354,7 +361,7 @@ from sft_chat_stats import summarize_token_lengths
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
-model_dir = os.environ["MERGED_MODEL_DIR"]
+model_dir = os.environ.get("EVAL_MODEL_DIR") or os.environ["MERGED_MODEL_DIR"]
 dataset_id = os.environ["EVAL_DATASET_ID"]
 dataset_config = os.environ["EVAL_DATASET_CONFIG"] or None
 split = os.environ["EVAL_DATASET_SPLIT"]
@@ -362,6 +369,9 @@ num_problems = int(os.environ["EVAL_NUM_PROBLEMS"])
 max_tokens = int(os.environ["EVAL_MAX_TOKENS"])
 batch_size = int(os.environ["EVAL_BATCH_SIZE"])
 results_file = os.environ["EVAL_RESULTS_FILE"]
+pass_n = int(os.environ.get("EVAL_PASS_N") or "1")
+temperature_text = os.environ.get("EVAL_TEMPERATURE") or ""
+temperature = float(temperature_text) if temperature_text else (0.7 if pass_n > 1 else 0.0)
 
 started = time.time()
 tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
@@ -392,7 +402,8 @@ stop = [tokenizer.eos_token, "<|im_end|>", "\n\n<unfinished_theory>"]
 stop = [item for item in stop if item]
 sampling = SamplingParams(
     max_tokens=max_tokens,
-    temperature=0.0,
+    temperature=temperature,
+    n=pass_n,
     stop=stop,
 )
 prompts = [format_prompt(str(row["prompt"])) for row in dataset]
@@ -434,11 +445,13 @@ rows = []
 exact = 0
 normalized_exact = 0
 for index, (example, output) in enumerate(zip(dataset, outputs)):
-    prediction = output.outputs[0].text.strip()
+    predictions = [candidate.text.strip() for candidate in output.outputs]
     gold = str(example["completion"]).strip()
-    normalized_prediction = strip_empty_think_prefix(prediction)
-    is_exact = prediction == gold
-    is_normalized_exact = normalized_prediction == gold
+    normalized_predictions = [strip_empty_think_prefix(prediction) for prediction in predictions]
+    prediction = predictions[0] if predictions else ""
+    normalized_prediction = normalized_predictions[0] if normalized_predictions else ""
+    is_exact = any(candidate == gold for candidate in predictions)
+    is_normalized_exact = any(candidate == gold for candidate in normalized_predictions)
     exact += int(is_exact)
     normalized_exact += int(is_normalized_exact)
     row = {
@@ -448,6 +461,8 @@ for index, (example, output) in enumerate(zip(dataset, outputs)):
         "gold": gold,
         "prediction": prediction,
         "normalized_prediction": normalized_prediction,
+        "predictions": predictions,
+        "normalized_predictions": normalized_predictions,
         "exact_match": is_exact,
         "normalized_exact_match": is_normalized_exact,
     }
@@ -461,10 +476,14 @@ summary = {
     "eval/requested_num_examples": limit,
     "eval/num_examples": len(prompts),
     "eval/batch_size": batch_size,
+    "eval/pass_n": pass_n,
+    "eval/temperature": temperature,
     "eval/exact": exact,
     "eval/exact_match": exact / len(prompts) if prompts else 0.0,
+    f"eval/pass@{pass_n}": exact / len(prompts) if prompts else 0.0,
     "eval/normalized_exact": normalized_exact,
     "eval/normalized_exact_match": normalized_exact / len(prompts) if prompts else 0.0,
+    f"eval/normalized_pass@{pass_n}": normalized_exact / len(prompts) if prompts else 0.0,
     "eval/normalization": "strip_empty_leading_think_block",
     "eval/runtime_seconds": time.time() - started,
 }
@@ -492,6 +511,8 @@ if os.environ.get("WANDB_MODE") != "disabled" and os.environ.get("WANDB_API_KEY"
             "gold",
             "prediction",
             "normalized_prediction",
+            "predictions",
+            "normalized_predictions",
             "exact_match",
             "normalized_exact_match",
         ]
@@ -504,6 +525,8 @@ if os.environ.get("WANDB_MODE") != "disabled" and os.environ.get("WANDB_API_KEY"
             row["gold"],
             row["prediction"],
             row["normalized_prediction"],
+            json.dumps(row["predictions"], ensure_ascii=False),
+            json.dumps(row["normalized_predictions"], ensure_ascii=False),
             row["exact_match"],
             row["normalized_exact_match"],
         )
