@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--template",
         type=Path,
-        default=repo_relative("sft/non_thinking_prompt.py"),
+        default=repo_relative("sft/non_thinking_prompt_leaves.py"),
         help="Python template file defining PROMPT_TEMPLATE and COMPLETION_TEMPLATE.",
     )
     parser.add_argument(
@@ -54,11 +54,6 @@ def parse_args() -> argparse.Namespace:
         help="Write a tiny deterministic split with 10 train examples and 2 test examples.",
     )
 
-    parser.add_argument(
-        "--include-non-leaf",
-        action="store_true",
-        help="Include non-leaf proof blocks. By default only leaf one-liner proof blocks are used.",
-    )
     parser.add_argument(
         "--max-seq-length",
         type=int,
@@ -104,7 +99,7 @@ def load_template_pair(path: Path) -> tuple[str, str]:
     return path.read_text(encoding="utf-8"), "{{ proof_block }}"
 
 
-def load_records(input_dir: Path, include_non_leaf: bool) -> list[dict[str, Any]]:
+def load_records(input_dir: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for path in sorted(input_dir.glob("*.json")):
         with path.open("r", encoding="utf-8") as handle:
@@ -114,8 +109,6 @@ def load_records(input_dir: Path, include_non_leaf: bool) -> list[dict[str, Any]
         for index, record in enumerate(payload):
             if not isinstance(record, dict):
                 raise ValueError(f"{path}[{index}] must be a JSON object")
-            if not include_non_leaf and not record.get("is_leaf", False):
-                continue
             proof_block = str(record.get("proof_block", "")).strip()
             if not proof_block:
                 continue
@@ -159,7 +152,10 @@ def build_example_text(
     overflow_tokens = estimate_tokens(f"{prompt}\n{completion}", chars_per_token) - max_seq_length
     chars_to_remove = int(overflow_tokens * chars_per_token) + 256
     while proof_text_before and estimate_tokens(f"{prompt}\n{completion}", chars_per_token) > max_seq_length:
-        proof_text_before = trim_from_start(proof_text_before, chars_to_remove)
+        trimmed_proof_text_before = trim_from_start(proof_text_before, chars_to_remove)
+        if trimmed_proof_text_before == proof_text_before:
+            break
+        proof_text_before = trimmed_proof_text_before
         context["proof_text_before"] = proof_text_before
         prompt = prompt_template.render(**context).rstrip()
         chars_to_remove *= 2
@@ -212,7 +208,7 @@ def main() -> None:
     if not args.smoke_test and not 0 < args.test_ratio < 1:
         raise ValueError("--test-ratio must be between 0 and 1")
 
-    records = load_records(args.input_dir, args.include_non_leaf)
+    records = load_records(args.input_dir)
     if not records:
         raise ValueError(f"no usable records found in {args.input_dir}")
 

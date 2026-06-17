@@ -26,7 +26,7 @@ normal SFT training continues.
 
 ## Tentative results (Maxi's dataset, random 80/20 train/test split)
                                 pass@1                  pass@16
-Base model (Qwen/Qwen3-0.6B)    0/497                   0/497
+Base model (Qwen/Qwen3-0.6B)     0/497                   0/497
 Fine-tuned                       123/497 = 24.7%        188/497 = 37.8%          
 
 
@@ -36,12 +36,14 @@ Fine-tuned                       123/497 = 24.7%        188/497 = 37.8%
 
 - [x] pretraining (i.e., before training) loss and vllm?
 - [ ] experiment with a thinking prompt
-- [ ] experiment with pass@N 
+- [x] experiment with pass@N 
     - [ ] agentic evaluation (instead of pass@N, pass the last one to the model to improve with isabelle's output)
     - [ ] what about agentic training?
-- [ ] experiment with a larger model
-
+    - [ ] what about RL training?
+- [ ] experiment with a larger model / frontier models
 - [ ] connect the output to the Isabelle
+- [ ] Hyperparameter search (learning rate, lora r, learning scheduler, warmup, dropout, many more epochs)
+- [ ] hard benchmark
 
 - [x] use ssh multiplexing to speed up interacting with HPC
 For Host:

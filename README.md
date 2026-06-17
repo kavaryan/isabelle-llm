@@ -74,3 +74,11 @@ To use interactive LLM recommendations in Isabelle/jEdit:
 isabelle components -u /path/to/isabelle-llm/jedit-plugin
 ```
 Once registered, the plugin will load on Isabelle startup and expose the **LLM Suggestions** dockable panel in jEdit.
+
+
+## SFT steps
+0. `cd isabelle-llm`
+1. Put extracted json pairs in `extractor/proof_extractor_out/json/*.json`
+2. Run `sft/sft-data$ ./prepare_sft_data.py` to generare train.json and test.json
+3. Run `sft/slurm/submit_finetune_model.sh` to submit an SFT job on HPC and get a job id
+4. Run `sft/slurm//monitor_slurm_job.sh <job-id>` to monitor the job 

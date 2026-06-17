@@ -34,4 +34,4 @@ docker run --rm \
   -v "$PWD/proof_extractor_out:/out:Z" \
   -v "$HEAPS_VOLUME:/home/isabelle/.isabelle/heaps" \
   isabelle-extractor \
-  -L -A -m 16 -c 4000 -v "${targets[@]}"
+  -A -m 16 -c 4000 -v "${targets[@]}"

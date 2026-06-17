@@ -59,6 +59,7 @@ Options:
   --learning-rate LR        Learning rate.
   --max-seq-length N        Max training sequence length.
   --batch-size N            Per-device train batch size.
+  --eval-loss-batch-size N  Per-device trainer eval-loss batch size. Default: 1.
   --grad-accum N            Gradient accumulation steps.
   --full-finetune           Train all weights instead of LoRA.
   --wandb-run-name NAME     Set W&B run name.
@@ -131,6 +132,7 @@ while (($#)); do
     --learning-rate) need_value "$@"; add_export LEARNING_RATE "$2"; shift 2 ;;
     --max-seq-length) need_value "$@"; add_export MAX_SEQ_LENGTH "$2"; shift 2 ;;
     --batch-size) need_value "$@"; add_export PER_DEVICE_TRAIN_BATCH_SIZE "$2"; shift 2 ;;
+    --eval-loss-batch-size) need_value "$@"; add_export PER_DEVICE_EVAL_BATCH_SIZE "$2"; shift 2 ;;
     --grad-accum) need_value "$@"; add_export GRADIENT_ACCUMULATION_STEPS "$2"; shift 2 ;;
     --full-finetune) add_export FULL_FINETUNE 1; shift ;;
     --wandb-run-name) need_value "$@"; add_export WANDB_RUN_NAME "$2"; shift 2 ;;
