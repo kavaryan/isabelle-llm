@@ -14,6 +14,7 @@ set -e
 # Pass theory names (or other options) as arguments to override the default
 # theory list, e.g.  ./run.sh HOL-Lattice.Lattice
 
+rm -rf proof_extractor_out
 mkdir -p proof_extractor_out
 
 # Default to the curated ~2000-goal theory list; any arguments override it.

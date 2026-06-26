@@ -120,6 +120,7 @@ object Proof_Extractor {
 
   sealed case class Record(
     theory: String, line: Int, offset: Int,
+    source_path: String = "",
     command: String = "",
     proof_text_before: String = "",
     state_before: String = "",
@@ -134,6 +135,7 @@ object Proof_Extractor {
         "theory" -> theory,
         "line" -> line,
         "offset" -> offset,
+        "source_path" -> source_path,
         "command" -> command,
         "proof_text_before" -> proof_text_before,
         "state_before" -> state_before,
@@ -308,6 +310,7 @@ object Proof_Extractor {
             theory = Long_Name.base_name(raw.theory),
             line = raw.line,
             offset = raw.offset,
+            source_path = raw.file_path,
             command = Symbol.decode(raw.command),
             proof_text_before = Symbol.decode(limit_context(history, context_symbols)),
             state_before = Symbol.decode(raw.state),
