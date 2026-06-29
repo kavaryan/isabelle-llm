@@ -1,0 +1,16 @@
+mini_ir_step 'lemma smoke: True'
+mini_ir_step 'by simp'
+
+# Test 2: bad syntax
+mini_ir_step 'lemma bad: 1 = 2'          # error: outer syntax
+
+# Test 3: back & fix context
+mini_ir_back && mini_ir_back             # to init
+mini_ir_step 'lemma bad: "1 = (2::nat)"' # OK, unprovable
+
+# Test 4: unprovable goal
+mini_ir_step 'try0'                      # No proof found
+
+# Test 5: back & fix
+mini_ir_back && mini_ir_back             # to init
+mini_ir_step 'lemma good: "1 = (1::nat)" by simp'

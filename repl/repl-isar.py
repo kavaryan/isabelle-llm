@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import shlex
 import socket
 import sys
 import time
@@ -69,6 +70,184 @@ def html_escape(text: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
+
+
+def has_unclosed_quotes(text: str) -> bool:
+    escaped = False
+    in_quote = False
+    for char in text:
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            in_quote = not in_quote
+    return in_quote
+
+
+def has_unbalanced_delimiters(text: str) -> bool:
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack: list[str] = []
+    in_quote = False
+    escaped = False
+
+    for char in text:
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            in_quote = not in_quote
+            continue
+        if in_quote:
+            continue
+        if char in "([{":
+            stack.append(char)
+        elif char in pairs:
+            if not stack or stack[-1] != pairs[char]:
+                return False
+            stack.pop()
+
+    return bool(stack)
+
+
+def looks_incomplete_isar(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    if lines and lines[0].split()[0] == "theory":
+        return lines[-1] != "begin"
+
+    if has_unclosed_quotes(stripped) or has_unbalanced_delimiters(stripped):
+        return True
+
+    last_line = stripped.splitlines()[-1].strip()
+    if last_line.endswith(":") or last_line.endswith(","):
+        return True
+
+    last_word = last_line.split()[-1] if last_line.split() else ""
+    return last_word in {
+        "and",
+        "assumes",
+        "defines",
+        "fixes",
+        "for",
+        "if",
+        "obtains",
+        "shows",
+        "where",
+    }
+
+
+def load_context(args: argparse.Namespace) -> str:
+    return os.environ.get("MINI_IR_CONTEXT", "").strip()
+
+
+def header_tokens(line: str) -> list[str]:
+    lexer = shlex.shlex(line, posix=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        return list(lexer)
+    except ValueError:
+        return line.split()
+
+
+def strip_header_comments(line: str, in_comment: bool) -> tuple[str, bool]:
+    result: list[str] = []
+    i = 0
+    while i < len(line):
+        if in_comment:
+            end = line.find("*)", i)
+            if end == -1:
+                return "".join(result), True
+            in_comment = False
+            i = end + 2
+            continue
+        start = line.find("(*", i)
+        if start == -1:
+            result.append(line[i:])
+            break
+        result.append(line[i:start])
+        in_comment = True
+        i = start + 2
+
+    return "".join(result), in_comment
+
+
+def parse_context(text: str) -> tuple[list[str], str]:
+    lines = text.splitlines()
+    cleaned_lines: list[str] = []
+    in_comment = False
+    cartouche_comment_depth = 0
+    for line in lines:
+        if cartouche_comment_depth > 0:
+            cartouche_comment_depth += line.count("\\<open>") - line.count("\\<close>")
+            cleaned_lines.append("")
+            continue
+        cleaned, in_comment = strip_header_comments(line, in_comment)
+        comment_pos = cleaned.find("\\<comment>")
+        if comment_pos != -1:
+            comment_text = cleaned[comment_pos:]
+            cartouche_comment_depth = (
+                comment_text.count("\\<open>") - comment_text.count("\\<close>")
+            )
+            cleaned = cleaned[:comment_pos]
+        cleaned_lines.append(cleaned)
+
+    theory_index = next((
+        i
+        for i, line in enumerate(cleaned_lines)
+        if line.strip() == "theory" or line.strip().startswith("theory ")
+    ), None)
+    if theory_index is None:
+        return [], text.strip()
+
+    imports: list[str] = []
+    in_imports = False
+    body_start = len(lines)
+
+    for i in range(theory_index, len(cleaned_lines)):
+        tokens = header_tokens(cleaned_lines[i])
+        if not tokens:
+            if not lines[i].strip():
+                in_imports = False
+            continue
+
+        if "begin" in tokens:
+            tokens = tokens[:tokens.index("begin")]
+            body_start = i + 1
+            for token in tokens:
+                if token == "imports":
+                    in_imports = True
+                    continue
+                if token in {"abbrevs", "keywords"}:
+                    in_imports = False
+                    continue
+                if in_imports and token not in {"theory"}:
+                    imports.append(token)
+            break
+
+        for token in tokens:
+            if token == "imports":
+                in_imports = True
+                continue
+            if token in {"abbrevs", "keywords"}:
+                in_imports = False
+                continue
+            if in_imports and token not in {"theory"}:
+                imports.append(token)
+
+    while body_start < len(lines) and not lines[body_start].strip():
+        body_start += 1
+    body = "\n".join(lines[body_start:]).strip()
+    return imports, body
 
 
 class ReplError(RuntimeError):
@@ -142,21 +321,44 @@ class IsarRepl:
         repl_id: str,
         theories: list[str],
         show_state: bool,
+        context_text: str = "",
     ):
         self.client = client
         self.repl_id = repl_id
         self.theories = theories
         self.show_state = show_state
+        self.context_text = context_text
+        self.step_count = 0
+        self.protected_steps = 0
 
     def start(self) -> None:
+        self.step_count = 0
+        self.protected_steps = 0
         theories = "[" + ", ".join(ml_str(t) for t in self.theories) + "]"
         self.print_result("init", *self.client.send(f"Ir.init {ml_str(self.repl_id)} {theories};"))
+        if self.context_text.strip():
+            self.apply_context()
+
+    def apply_context(self) -> None:
+        output, had_error = self.client.send(
+            f"Ir.step {ml_str(self.repl_id)} {ml_str(self.context_text)};"
+        )
+        self.print_result("context", output, had_error)
+        if not had_error:
+            self.step_count += 1
+            self.protected_steps = self.step_count
+        if not had_error and self.show_state:
+            state, state_error = self.client.send(f"Ir.state {ml_str(self.repl_id)} ~1;")
+            if state.strip():
+                self.print_result("state", state, state_error)
 
     def step(self, isar_text: str) -> None:
         output, had_error = self.client.send(
             f"Ir.step {ml_str(self.repl_id)} {ml_str(isar_text)};"
         )
         self.print_result("step", output, had_error)
+        if not had_error:
+            self.step_count += 1
         if not had_error and self.show_state:
             state, state_error = self.client.send(f"Ir.state {ml_str(self.repl_id)} ~1;")
             if state.strip():
@@ -175,7 +377,17 @@ class IsarRepl:
         self.print_result("text", *self.client.send(f"Ir.text {ml_str(self.repl_id)};"))
 
     def back(self) -> None:
-        self.print_result("back", *self.client.send(f"Ir.back {ml_str(self.repl_id)};"))
+        if self.step_count <= self.protected_steps:
+            self.print_result(
+                "back",
+                "At initial MINI_IR_CONTEXT; refusing to back past protected context.",
+                False,
+            )
+            return
+        output, had_error = self.client.send(f"Ir.back {ml_str(self.repl_id)};")
+        self.print_result("back", output, had_error)
+        if not had_error:
+            self.step_count -= 1
         if self.show_state:
             self.state()
 
@@ -221,8 +433,8 @@ def print_help() -> None:
   {CYAN}:help{RST}                 show this help
   {CYAN}:quit{RST}                 exit
 
-Everything else is sent as one Isar step. Do not type theory headers; choose
-the starting theory with --theory/--theories."""
+Everything else is sent as one Isar step. CONTEXT may provide an initial
+theory/imports header and body to replay before the prompt starts."""
     )
 
 
@@ -254,12 +466,8 @@ def handle_command(repl: IsarRepl, line: str) -> bool:
     return True
 
 
-def selected_theories(args: argparse.Namespace) -> list[str]:
-    theories: list[str] = []
-    if args.theories:
-        theories.extend(t.strip() for t in args.theories.split(",") if t.strip())
-    theories.extend(args.theory or [])
-    return theories or ["Main"]
+def selected_theories(context_imports: list[str] | None = None) -> list[str]:
+    return context_imports or ["Main"]
 
 
 def prompt_text(repl_id: str, multiline: bool = False):
@@ -312,13 +520,17 @@ def input_loop(repl: IsarRepl, history_file: str) -> int:
             stripped = line.strip()
             try:
                 if multiline is not None:
-                    if stripped == ":}":
+                    if not stripped:
                         block = "\n".join(multiline).strip()
                         multiline = None
                         if block:
                             repl.step(block)
                         continue
                     multiline.append(line)
+                    block = "\n".join(multiline).strip()
+                    if block and not looks_incomplete_isar(block):
+                        multiline = None
+                        repl.step(block)
                     continue
 
                 if stripped.startswith(":"):
@@ -326,7 +538,10 @@ def input_loop(repl: IsarRepl, history_file: str) -> int:
                         return 0
                     continue
                 if stripped:
-                    repl.step(line)
+                    if looks_incomplete_isar(line):
+                        multiline = [line]
+                    else:
+                        repl.step(line)
             except (OSError, ReplError, ValueError) as exc:
                 print(f"error: {exc}", file=sys.stderr)
 
@@ -342,8 +557,6 @@ def parse_args() -> argparse.Namespace:
         "--repl",
         default=os.environ.get("IR_ISAR_REPL_ID", f"R_{os.getpid()}_{int(time.time())}"),
     )
-    parser.add_argument("--theory", action="append", help="Theory to import; may be repeated.")
-    parser.add_argument("--theories", help="Comma-separated theories to import.")
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--no-auto-state", action="store_true")
     parser.add_argument(
@@ -370,10 +583,14 @@ def run_mcp(args: argparse.Namespace) -> int:
         return 2
 
     client = IrTcpClient(args.host, args.port, args.token, args.timeout)
+    context_imports, context_text = parse_context(load_context(args))
     repl_state = {
         "id": args.repl,
-        "theories": selected_theories(args),
+        "theories": selected_theories(context_imports),
+        "context": context_text,
         "initialized": False,
+        "step_count": 0,
+        "protected_steps": 0,
     }
     mcp = FastMCP(
         "mini_ir",
@@ -394,7 +611,17 @@ def run_mcp(args: argparse.Namespace) -> int:
         if repl_state["initialized"]:
             return ""
         theories = "[" + ", ".join(ml_str(t) for t in repl_state["theories"]) + "]"
+        repl_state["step_count"] = 0
+        repl_state["protected_steps"] = 0
         output = send_sync(f"Ir.init {ml_str(repl_state['id'])} {theories};")
+        if repl_state["context"].strip():
+            context_output = send_sync(
+                f"Ir.step {ml_str(repl_state['id'])} {ml_str(repl_state['context'])};"
+            )
+            repl_state["step_count"] += 1
+            repl_state["protected_steps"] = repl_state["step_count"]
+            if context_output.strip():
+                output = (output.rstrip() + "\n\n-- context --\n" + context_output.strip()).strip()
         repl_state["initialized"] = True
         return output
 
@@ -405,6 +632,7 @@ def run_mcp(args: argparse.Namespace) -> int:
             step_output = send_sync(
                 f"Ir.step {ml_str(repl_state['id'])} {ml_str(isar_text)};"
             )
+            repl_state["step_count"] += 1
             state_output = send_sync(f"Ir.state {ml_str(repl_state['id'])} ~1;")
             parts = []
             if init_output.strip():
@@ -421,7 +649,10 @@ def run_mcp(args: argparse.Namespace) -> int:
     async def back() -> str:
         def work() -> str:
             ensure_init_sync()
+            if repl_state["step_count"] <= repl_state["protected_steps"]:
+                return "At initial MINI_IR_CONTEXT; refusing to back past protected context."
             back_output = send_sync(f"Ir.back {ml_str(repl_state['id'])};")
+            repl_state["step_count"] -= 1
             state_output = send_sync(f"Ir.state {ml_str(repl_state['id'])} ~1;")
             parts = []
             if back_output.strip():
@@ -441,6 +672,8 @@ def run_mcp(args: argparse.Namespace) -> int:
                 except Exception:
                     pass
             repl_state["initialized"] = False
+            repl_state["step_count"] = 0
+            repl_state["protected_steps"] = 0
             return ensure_init_sync()
 
         return await asyncio.to_thread(work)
@@ -475,11 +708,13 @@ def main() -> int:
     history.parent.mkdir(parents=True, exist_ok=True)
 
     client = IrTcpClient(args.host, args.port, args.token, args.timeout)
+    context_imports, context_text = parse_context(load_context(args))
     repl = IsarRepl(
         client,
         args.repl,
-        selected_theories(args),
+        selected_theories(context_imports),
         show_state=not args.no_auto_state,
+        context_text=context_text,
     )
     try:
         repl.start()
