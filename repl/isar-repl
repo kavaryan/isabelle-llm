@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source ~/.venv/bin/activate
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! python -c "import prompt_toolkit" >/dev/null 2>&1; then
+    echo "prompt_toolkit is not installed in the virtual environment. Please install it with 'pip install prompt_toolkit' to have full functionality." >&2
+fi
+
+exec python "$script_dir/repl-isar.py" \
+    --host "${IR_REPL_HOST:-127.0.0.1}" \
+    --port "${IR_REPL_PORT:-9147}" \
+    --token "${IR_AUTH_TOKEN:-local-dev-token}" \
+    "$@"
