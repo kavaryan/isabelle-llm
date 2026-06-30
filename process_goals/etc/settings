@@ -1,0 +1,4 @@
+# -*- shell-script -*- :mode=shellscript:
+
+GOALS_HOME="$COMPONENT"
+ISABELLE_GOALS_JAR="$GOALS_HOME/lib/isabelle_goals.jar"

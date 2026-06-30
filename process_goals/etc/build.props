@@ -1,0 +1,20 @@
+title = Isabelle theory-goal tools (extract / filter / bench)
+module = $ISABELLE_GOALS_JAR
+requirements = \
+  env:ISABELLE_SCALA_JAR
+sources = \
+  src/goals_query.scala \
+  src/goals_core.scala \
+  src/goals_args.scala \
+  src/goals_output.scala \
+  src/goals_http.scala \
+  src/goals_extract.scala \
+  src/goals_filter.scala \
+  src/goals_bench.scala \
+  src/goals_probe.scala
+services = \
+  isabelle.goals.Goals_Extract_Tool \
+  isabelle.goals.Goals_Filter_Tool \
+  isabelle.goals.Goals_Bench_Tool \
+  isabelle.goals.Goals_Run_Tool \
+  isabelle.goals.Goals_Builtin_Probes
