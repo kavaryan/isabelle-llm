@@ -50,7 +50,7 @@ else
   log_step "stage 1: using existing $ROWS"
 fi
 
-log_step "stage 2: one-shot Codex rollouts"
+log_step "stage 2: one-shot OpenCode rollouts"
 python3 run_oneshot_codex.py \
   --input "$ROWS" \
   --output "$ONESHOT"

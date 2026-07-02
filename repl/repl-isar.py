@@ -145,8 +145,20 @@ def looks_incomplete_isar(text: str) -> bool:
     }
 
 
-def load_context(args: argparse.Namespace) -> str:
-    return os.environ.get("MINI_IR_CONTEXT", "").strip()
+def load_context_text(args: argparse.Namespace) -> str:
+    return os.environ.get("MINI_IR_CONTEXT_TEXT", "").strip()
+
+
+def load_context_file(args: argparse.Namespace) -> tuple[str, int] | None:
+    spec = os.environ.get("MINI_IR_CONTEXT_FILE", "").strip()
+    if not spec:
+        return None
+    path, sep, line_text = spec.rpartition(":")
+    if not sep or not path or not line_text.isdigit():
+        raise ValueError(
+            "MINI_IR_CONTEXT_FILE must have the form /path/to/Theory.thy:LINE"
+        )
+    return path, int(line_text)
 
 
 def header_tokens(line: str) -> list[str]:
@@ -250,6 +262,19 @@ def parse_context(text: str) -> tuple[list[str], str]:
     return imports, body
 
 
+def infer_session_prefixes(text: str) -> list[str]:
+    prefixes: list[str] = []
+    for line in text.splitlines():
+        if "Title:" not in line:
+            continue
+        path = line.split("Title:", 1)[1].strip()
+        if path.endswith(".thy"):
+            parts = path[:-4].split("/")
+            if len(parts) > 2:
+                prefixes.append("-".join(parts[:-1]))
+    return list(dict.fromkeys(prefixes))
+
+
 class ReplError(RuntimeError):
     pass
 
@@ -322,22 +347,53 @@ class IsarRepl:
         theories: list[str],
         show_state: bool,
         context_text: str = "",
+        context_file: tuple[str, int] | None = None,
+        session_prefixes: list[str] | None = None,
     ):
         self.client = client
         self.repl_id = repl_id
         self.theories = theories
         self.show_state = show_state
         self.context_text = context_text
+        self.context_file = context_file
+        self.session_prefixes = session_prefixes or []
         self.step_count = 0
         self.protected_steps = 0
 
     def start(self) -> None:
         self.step_count = 0
         self.protected_steps = 0
+        if self.context_file is not None:
+            self.init_at_context_file()
+            if self.context_text.strip():
+                self.apply_context()
+            return
+        self.theories = resolve_theories(self.client, self.theories, self.session_prefixes)
         theories = "[" + ", ".join(ml_str(t) for t in self.theories) + "]"
         self.print_result("init", *self.client.send(f"Ir.init {ml_str(self.repl_id)} {theories};"))
         if self.context_text.strip():
             self.apply_context()
+
+    def init_at_context_file(self) -> None:
+        assert self.context_file is not None
+        path, line = self.context_file
+        resolved, resolve_error = self.client.send(f'/resolve "{path}" {line}')
+        self.print_result("resolve", resolved, resolve_error)
+        if resolve_error:
+            raise ReplError(f"MINI_IR_CONTEXT_FILE failed to resolve: {resolved}")
+        spec = resolved.strip()
+        if (
+            not spec
+            or spec.startswith("No ")
+            or spec.startswith("Cannot ")
+            or spec.startswith("Usage")
+            or "\n" in spec
+        ):
+            raise ReplError(f"MINI_IR_CONTEXT_FILE failed to resolve: {spec}")
+        self.print_result(
+            "init",
+            *self.client.send(f"Ir.init {ml_str(self.repl_id)} [{ml_str(spec)}];"),
+        )
 
     def apply_context(self) -> None:
         output, had_error = self.client.send(
@@ -380,7 +436,7 @@ class IsarRepl:
         if self.step_count <= self.protected_steps:
             self.print_result(
                 "back",
-                "At initial MINI_IR_CONTEXT; refusing to back past protected context.",
+                "At initial MINI_IR context; refusing to back past protected context.",
                 False,
             )
             return
@@ -468,6 +524,56 @@ def handle_command(repl: IsarRepl, line: str) -> bool:
 
 def selected_theories(context_imports: list[str] | None = None) -> list[str]:
     return context_imports or ["Main"]
+
+
+def available_theories(client: IrTcpClient) -> list[str]:
+    output, had_error = client.send("Ir.theories ();")
+    if had_error:
+        return []
+    theories: list[str] = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("[timing]"):
+            continue
+        theories.append(stripped)
+    return theories
+
+
+def try_load_theory(client: IrTcpClient, theory: str) -> bool:
+    _output, had_error = client.send(f"Ir.load_theory {ml_str(theory)};")
+    return not had_error
+
+
+def resolve_theories(
+    client: IrTcpClient,
+    theories: list[str],
+    session_prefixes: list[str] | None = None,
+) -> list[str]:
+    available = available_theories(client)
+    available_set = set(available)
+    resolved: list[str] = []
+    prefixes = session_prefixes or []
+    for theory in theories:
+        if theory in available_set or "." in theory:
+            resolved.append(theory)
+            continue
+        suffix = "." + theory
+        matches = [name for name in available if name.endswith(suffix)]
+        if len(matches) == 1:
+            resolved.append(matches[0])
+            continue
+
+        loadable = []
+        for prefix in prefixes:
+            candidate = f"{prefix}.{theory}"
+            if try_load_theory(client, candidate):
+                loadable.append(candidate)
+        if len(loadable) == 1:
+            resolved.append(loadable[0])
+            continue
+
+        resolved.append(theory)
+    return resolved
 
 
 def prompt_text(repl_id: str, multiline: bool = False):
@@ -583,11 +689,15 @@ def run_mcp(args: argparse.Namespace) -> int:
         return 2
 
     client = IrTcpClient(args.host, args.port, args.token, args.timeout)
-    context_imports, context_text = parse_context(load_context(args))
+    raw_context = load_context_text(args)
+    context_file = load_context_file(args)
+    context_imports, context_text = parse_context(raw_context)
     repl_state = {
         "id": args.repl,
         "theories": selected_theories(context_imports),
+        "session_prefixes": infer_session_prefixes(raw_context),
         "context": context_text,
+        "context_file": context_file,
         "initialized": False,
         "step_count": 0,
         "protected_steps": 0,
@@ -610,6 +720,43 @@ def run_mcp(args: argparse.Namespace) -> int:
     def ensure_init_sync() -> str:
         if repl_state["initialized"]:
             return ""
+        if repl_state["context_file"] is not None:
+            path, line = repl_state["context_file"]
+            resolved = send_sync(f'/resolve "{path}" {line}').strip()
+            if (
+                not resolved
+                or resolved.startswith("No ")
+                or resolved.startswith("Cannot ")
+                or resolved.startswith("Usage")
+                or "\n" in resolved
+            ):
+                raise RuntimeError(
+                    f"MINI_IR_CONTEXT_FILE failed to resolve {path}:{line}: {resolved}"
+                )
+            output = send_sync(
+                f"Ir.init {ml_str(repl_state['id'])} [{ml_str(resolved)}];"
+            )
+            repl_state["step_count"] = 0
+            repl_state["protected_steps"] = 0
+            if repl_state["context"].strip():
+                context_output = send_sync(
+                    f"Ir.step {ml_str(repl_state['id'])} {ml_str(repl_state['context'])};"
+                )
+                repl_state["step_count"] += 1
+                repl_state["protected_steps"] = repl_state["step_count"]
+                if context_output.strip():
+                    output = (
+                        output.rstrip()
+                        + "\n\n-- context --\n"
+                        + context_output.strip()
+                    ).strip()
+            repl_state["initialized"] = True
+            return output
+        repl_state["theories"] = resolve_theories(
+            client,
+            repl_state["theories"],
+            repl_state["session_prefixes"],
+        )
         theories = "[" + ", ".join(ml_str(t) for t in repl_state["theories"]) + "]"
         repl_state["step_count"] = 0
         repl_state["protected_steps"] = 0
@@ -650,7 +797,7 @@ def run_mcp(args: argparse.Namespace) -> int:
         def work() -> str:
             ensure_init_sync()
             if repl_state["step_count"] <= repl_state["protected_steps"]:
-                return "At initial MINI_IR_CONTEXT; refusing to back past protected context."
+                return "At initial MINI_IR context; refusing to back past protected context."
             back_output = send_sync(f"Ir.back {ml_str(repl_state['id'])};")
             repl_state["step_count"] -= 1
             state_output = send_sync(f"Ir.state {ml_str(repl_state['id'])} ~1;")
@@ -678,7 +825,19 @@ def run_mcp(args: argparse.Namespace) -> int:
 
         return await asyncio.to_thread(work)
 
-    @mcp.tool(description="Search for Isabelle theorems in the current proof context.")
+    @mcp.tool(
+        description=(
+            "Search for Isabelle theorems in the current proof context using "
+            "Isabelle Find_Theorems query syntax. Exact fact-name lookup is NOT "
+            "a bare word: use name: le_antisym, name: conjI, name: partial_order, "
+            "etc. A bare word/query is treated as a theorem statement/content "
+            "criterion, so query='le_antisym' may return 0 even though "
+            "step('thm le_antisym') succeeds. Use quoted term patterns for "
+            "statement search, e.g. query='\"_ + _ = _ + _\"', and simp:\"term\" "
+            "for simp rules. Use intro, elim, dest, or solves for goal-based "
+            "search. Prefix a criterion with - to negate it, e.g. -name: foo."
+        )
+    )
     async def find_theorems(query: str, limit: int = 20) -> str:
         def work() -> str:
             ensure_init_sync()
@@ -708,13 +867,17 @@ def main() -> int:
     history.parent.mkdir(parents=True, exist_ok=True)
 
     client = IrTcpClient(args.host, args.port, args.token, args.timeout)
-    context_imports, context_text = parse_context(load_context(args))
+    raw_context = load_context_text(args)
+    context_file = load_context_file(args)
+    context_imports, context_text = parse_context(raw_context)
     repl = IsarRepl(
         client,
         args.repl,
         selected_theories(context_imports),
         show_state=not args.no_auto_state,
         context_text=context_text,
+        context_file=context_file,
+        session_prefixes=infer_session_prefixes(raw_context),
     )
     try:
         repl.start()

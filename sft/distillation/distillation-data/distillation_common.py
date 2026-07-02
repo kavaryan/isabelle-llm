@@ -7,10 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
-CODEX_BIN = "/home/me/.vscode-server/extensions/openai.chatgpt-26.616.81150-linux-x64/bin/linux-x86_64/codex"
-
-
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if not path.exists():

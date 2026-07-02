@@ -28,6 +28,11 @@ from distillation_common import append_jsonl, build_candidate_theory, done_keys,
 
 
 DEFAULT_DOCKER_IMAGE = "isabelle-extractor"
+ISABELLE_SYMBOLS = {
+    "∈": r"\<in>",
+    "⊑": r"\<sqsubseteq>",
+    "⨅": r"\<Sqinter>",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,24 +82,56 @@ def rewrite_header(text: str, new_theory: str, session: str) -> str:
     return text[: match.start()] + replacement + text[match.end() :]
 
 
-def candidate_text(row: dict[str, Any], proof_field: str, theory_name: str) -> str:
-    proof = str(row.get(proof_field, "")).strip()
+def normalize_isabelle_symbols(text: str) -> str:
+    for symbol, replacement in ISABELLE_SYMBOLS.items():
+        text = text.replace(symbol, replacement)
+    return text
+
+
+def neutralize_cite_antiquotations(text: str) -> str:
+    lines = []
+    marker = r"\<^cite>\<open>"
+    close = r"\<close>"
+    for line in text.splitlines():
+        start = line.find(marker)
+        if start != -1:
+            end = line.rfind(close)
+            if end > start:
+                line = line[:start] + "citation" + line[end + len(close) :]
+        lines.append(line)
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
+
+def candidate_text_from_proof(row: dict[str, Any], proof: str, theory_name: str, proof_name: str) -> str:
+    proof = normalize_isabelle_symbols(proof).strip()
     if not proof:
-        raise ValueError(f"{proof_field} is empty")
+        raise ValueError(f"{proof_name} is empty")
     text = build_candidate_theory(row, proof).rstrip() + "\n\nend\n"
+    text = neutralize_cite_antiquotations(text)
     session = source_session(str(row.get("source_path", "")))
     return rewrite_header(text, theory_name, session)
 
 
-def check_with_docker(row: dict[str, Any], proof_field: str, docker_image: str, timeout: int) -> tuple[bool, str, str]:
+def candidate_text(row: dict[str, Any], proof_field: str, theory_name: str) -> str:
+    return candidate_text_from_proof(row, str(row.get(proof_field, "")), theory_name, proof_field)
+
+
+def check_proof_with_docker(
+    row: dict[str, Any],
+    proof: str,
+    proof_name: str,
+    docker_image: str,
+    timeout: int,
+    theory_suffix: str,
+) -> tuple[bool, str, str, str]:
     source_path = str(row.get("source_path", ""))
     session = source_session(source_path)
     digest = hashlib.sha1(row_key(row).encode("utf-8")).hexdigest()[:12]
-    theory_name = f"Distill_Check_{digest}"
+    theory_name = f"Distill_Check_{digest}_{theory_suffix}"
     try:
-        text = candidate_text(row, proof_field, theory_name)
+        text = candidate_text_from_proof(row, proof, theory_name, proof_name)
     except Exception as exc:
-        return False, str(exc), ""
+        return False, str(exc), "", ""
 
     with tempfile.TemporaryDirectory(prefix="isabelle-check-") as tmp:
         root = Path(tmp)
@@ -130,8 +167,19 @@ def check_with_docker(row: dict[str, Any], proof_field: str, docker_image: str, 
             )
         except subprocess.TimeoutExpired as exc:
             output = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
-            return False, f"timeout after {timeout}s", output
-        return proc.returncode == 0, "" if proc.returncode == 0 else proc.stdout, proc.stdout
+            return False, f"timeout after {timeout}s", output, text
+        return proc.returncode == 0, "" if proc.returncode == 0 else proc.stdout, proc.stdout, text
+
+
+def check_with_docker(row: dict[str, Any], proof_field: str, docker_image: str, timeout: int) -> tuple[bool, str, str, str]:
+    return check_proof_with_docker(
+        row,
+        str(row.get(proof_field, "")),
+        proof_field,
+        docker_image,
+        timeout,
+        "candidate",
+    )
 
 
 def main() -> None:
@@ -144,7 +192,15 @@ def main() -> None:
     for row in rows:
         if row_key(row) in completed:
             continue
-        ok, error, output = check_with_docker(row, args.proof_field, args.docker_image, args.timeout)
+        ok, error, output, checked_text = check_with_docker(row, args.proof_field, args.docker_image, args.timeout)
+        answer_ok, answer_error, answer_output, answer_checked_text = check_proof_with_docker(
+            row,
+            str(row.get("answer", "")),
+            "answer",
+            args.docker_image,
+            args.timeout,
+            "answer",
+        )
         proof = str(row.get(args.proof_field, ""))
         out = dict(row)
         out.update(
@@ -153,7 +209,12 @@ def main() -> None:
                 f"{args.prefix}_isabelle_error": error,
                 f"{args.prefix}_isabelle_notes": "docker isabelle build",
                 f"{args.prefix}_check_output": output,
-                f"{args.prefix}_checked_theory_text": build_candidate_theory(row, proof) if proof else "",
+                f"{args.prefix}_checked_theory_text": checked_text,
+                "answer_isabelle_ok": answer_ok,
+                "answer_isabelle_error": answer_error,
+                "answer_isabelle_notes": "docker isabelle build",
+                "answer_check_output": answer_output,
+                "answer_checked_theory_text": answer_checked_text,
             }
         )
         append_jsonl(args.output, out)

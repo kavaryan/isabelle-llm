@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""Run no-tool one-shot Codex attempts for multiline distillation rows."""
+"""Run no-tool one-shot OpenCode attempts for multiline distillation rows."""
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import subprocess
 import tempfile
+
 from pathlib import Path
 
-from distillation_common import CODEX_BIN, append_jsonl, done_keys, extract_last_fenced_code, make_sorry_question, read_jsonl, row_key
+from distillation_common import append_jsonl, done_keys, extract_last_fenced_code, make_sorry_question, read_jsonl, row_key
+
+
+OPENCODE_BIN = "/home/me/.opencode/bin/opencode"
 
 
 def parse_args() -> argparse.Namespace:
@@ -17,8 +23,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", type=Path, default=here / "01_multiline_distillation.jsonl")
     parser.add_argument("--output", type=Path, default=here / "02_oneshot_rollouts.jsonl")
     parser.add_argument("--limit", type=int, help="Maximum new rows to process.")
-    parser.add_argument("--model", default="gpt-5.5")
-    parser.add_argument("--codex-bin", default=CODEX_BIN)
+    parser.add_argument("--model", default=os.environ.get("OPENCODE_MODEL", ""))
+    parser.add_argument("--opencode-bin", default=OPENCODE_BIN)
     return parser.parse_args()
 
 
@@ -29,6 +35,9 @@ Rules:
 - Do not use tools, search, shell commands, MCP, or external resources.
 - Reason from the provided Isabelle theory prefix only.
 - Replace the final `sorry` with a complete proof.
+- If the missing proof follows a theorem/lemma statement, start with a proof
+  command such as `proof`, `proof -`, or `by ...` before using proof-local
+  commands like `let`, `fix`, `assume`, or `have`.
 - End your answer with exactly one fenced code block containing only the replacement proof text.
 
 Theory: {row.get("theory")}
@@ -42,30 +51,43 @@ Isabelle theory prefix with the missing proof marked by sorry:
 """
 
 
-def run_codex(codex_bin: str, model: str, prompt: str) -> tuple[int, str, str]:
-    with tempfile.TemporaryDirectory(prefix="codex-oneshot-") as tmp:
-        last = Path(tmp) / "last.txt"
+def final_message_from_opencode_events(events: str) -> str:
+    text_parts: list[str] = []
+    fallback_lines: list[str] = []
+    for line in events.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            if line.strip():
+                fallback_lines.append(line)
+            continue
+        candidates = [event, event.get("part"), event.get("message")]
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            if candidate.get("role") == "assistant" and isinstance(candidate.get("content"), str):
+                text_parts.append(candidate["content"])
+            if candidate.get("type") in {"text", "message"} and isinstance(candidate.get("text"), str):
+                text_parts.append(candidate["text"])
+    return "\n".join(text_parts).strip() or "\n".join(fallback_lines).strip()
+
+
+def run_opencode(opencode_bin: str, model: str, prompt: str) -> tuple[int, str, str]:
+    with tempfile.TemporaryDirectory(prefix="opencode-oneshot-") as tmp:
         cmd = [
-            codex_bin,
-            "exec",
-            "--ignore-user-config",
-            "--ignore-rules",
-            "--disable",
-            "shell_tool",
-            "--sandbox",
-            "read-only",
-            "-c",
-            "approval_policy=\"never\"",
-            "--model",
-            model,
-            "--json",
-            "--output-last-message",
-            str(last),
-            "-",
+            opencode_bin,
+            "run",
+            "--pure",
+            "--format",
+            "json",
+            "--dir",
+            tmp,
         ]
-        proc = subprocess.run(cmd, input=prompt, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
-        final = last.read_text(encoding="utf-8") if last.exists() else ""
-        return proc.returncode, final, proc.stdout
+        if model:
+            cmd.extend(["--model", model])
+        cmd.append(prompt)
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
+        return proc.returncode, final_message_from_opencode_events(proc.stdout), proc.stdout
 
 
 def main() -> None:
@@ -77,7 +99,7 @@ def main() -> None:
         if row_key(row) in completed:
             continue
         prompt = prompt_for(row)
-        returncode, final, events = run_codex(args.codex_bin, args.model, prompt)
+        returncode, final, events = run_opencode(args.opencode_bin, args.model, prompt)
         proof = extract_last_fenced_code(final)
         out = dict(row)
         out.update(

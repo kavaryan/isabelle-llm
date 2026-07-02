@@ -18,7 +18,7 @@ lemma impossible: "False"'
 start_mcp() {
   local context="$1"
   coproc MCP_SERVER {
-    MINI_IR_CONTEXT="$context" "$script_dir/isar-repl" \
+    MINI_IR_CONTEXT_TEXT="$context" "$script_dir/isar-repl" \
       --mcp \
       --host "${IR_REPL_HOST:-127.0.0.1}" \
       --port "${IR_REPL_PORT:-9147}" \
@@ -85,7 +85,7 @@ call_step_then_back_twice() {
   jq -r '.result.content[0].text // (.error.message // .)' <<<"$response"
 }
 
-echo "== positive: MINI_IR_CONTEXT proves with by blast =="
+echo "== positive: MINI_IR_CONTEXT_TEXT proves with by blast =="
 positive_output="$(call_step_by_blast "$positive_context")"
 printf '%s\n\n' "$positive_output"
 if ! grep -q 'theorem swap_conj' <<<"$positive_output"; then
@@ -93,7 +93,7 @@ if ! grep -q 'theorem swap_conj' <<<"$positive_output"; then
   exit 1
 fi
 
-echo "== negative: only MINI_IR_CONTEXT differs; by blast should fail =="
+echo "== negative: only MINI_IR_CONTEXT_TEXT differs; by blast should fail =="
 negative_output="$(call_step_by_blast "$negative_context")"
 printf '%s\n\n' "$negative_output"
 if ! grep -Eq 'Error executing tool step|Failed to apply proof method|False' <<<"$negative_output"; then
@@ -101,12 +101,12 @@ if ! grep -Eq 'Error executing tool step|Failed to apply proof method|False' <<<
   exit 1
 fi
 
-echo "== back protection: cannot back past MINI_IR_CONTEXT =="
+echo "== back protection: cannot back past MINI_IR_CONTEXT_TEXT =="
 back_output="$(call_step_then_back_twice "$positive_context")"
 printf '%s\n\n' "$back_output"
 if ! grep -q 'refusing to back past protected context' <<<"$back_output"; then
-  echo "back protection did not refuse to remove MINI_IR_CONTEXT" >&2
+  echo "back protection did not refuse to remove MINI_IR_CONTEXT_TEXT" >&2
   exit 1
 fi
 
-echo "mini_ir MINI_IR_CONTEXT env test passed"
+echo "mini_ir MINI_IR_CONTEXT_TEXT env test passed"

@@ -19,6 +19,10 @@ args=(
     -p 9147:19147
     -p 9148:19148
 )
+heaps_dir="${ISABELLE_HEAPS_DIR:-${HOME}/tmp/.heaps}"
+mkdir -p "$heaps_dir"
+args+=(-v "${heaps_dir}:/home/isabelle/.isabelle/heaps")
+
 run_flags=(-i --rm)
 if [ -t 0 ] && [ -t 1 ]; then
     run_flags=(-it --rm)
@@ -47,6 +51,7 @@ args+=(-e "IQ_AUTH_TOKEN=${IQ_AUTH_TOKEN:-local-dev-token}")
 args+=(-e "IQ_MCP_ALLOWED_ROOTS=/home/isabelle/thys/" -e "IQ_MCP_ALLOWED_READ_ROOTS=/home/isabelle/thys/")
 args+=(-e "ISABELLE_IR_HOME=/home/isabelle/AutoCorrode/ir")
 args+=(-e "IR_AUTH_TOKEN=${IR_AUTH_TOKEN:-local-dev-token}")
+args+=(-e "MINI_IR_SESSION=${MINI_IR_SESSION:-HOL}")
 
 cmd=(
     env bash -lc
@@ -56,7 +61,7 @@ socat TCP-LISTEN:19147,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:9147 &
 socat TCP-LISTEN:19148,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:9148 &
 exec python3 ./repl.py \
   --isabelle /home/isabelle/Isabelle2025-2/bin/isabelle \
-  --session "${IR_SESSION:-HOL}" \
+  --session "${MINI_IR_SESSION:-HOL}" \
   --poly-ml-port 9146 \
   --port 9147 \
   --mcp \
