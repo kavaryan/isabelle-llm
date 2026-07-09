@@ -10,6 +10,22 @@ package isabelle.goals
 import isabelle._
 
 
+// re-reads `path` through `load` only when `path` changes -- a probe's
+// apply() runs once per goal, but prior-phase JSON / prompt templates only
+// need reading once per run
+final class Path_Cache[A](load: Path => A) {
+  private var cached_path: String = ""
+  private var cached_value: Option[A] = None
+  def get(path: String): A = {
+    if (path != cached_path || cached_value.isEmpty) {
+      cached_value = Some(load(Path.explode(path)))
+      cached_path = path
+    }
+    cached_value.get
+  }
+}
+
+
 object Goals_Output {
   // one extraction record per proof step
   sealed case class Record(
@@ -48,6 +64,20 @@ object Goals_Output {
     File.write(file, JSON.Format.pretty_print(refs.map(_.json): JSON.T))
   }
 
+  // any phase-output JSON array, keyed by (theory, line, offset) -- lets a later
+  // phase look up the previous phase's record (proof_text, file_hash, ...) for
+  // the goal it is currently visiting
+  def read_records_by_position(file: Path): Map[(String, Int, Int), JSON.T] =
+    JSON.parse(File.read(file)) match {
+      case xs: List[_] =>
+        xs.collect { case obj: JSON.Object.T @unchecked =>
+          val key = (JSON.string(obj, "theory").getOrElse(""),
+            JSON.int(obj, "line").getOrElse(0), JSON.int(obj, "offset").getOrElse(0))
+          key -> (obj: JSON.T)
+        }.toMap
+      case _ => Map.empty
+    }
+
   def read_whitelist(file: Path): List[Goal_Ref] =
     JSON.parse(File.read(file)) match {
       case xs: List[_] =>
@@ -76,12 +106,12 @@ object Goals_Output {
 
 
   private val label_width = 12
-  private def label(s: String): String = Library.format("%-" + label_width + "s", s)
+  private def label(s: String): String = ("%-" + label_width + "s").format(s)
 
   // benchmark log: "label goal.NAME CPUms theory line:offset RESULT"
   def log_line(label: String, name: String, ms: Int, theory: String, line: Int, offset: Int, result: String): String =
-    this.label(label) + " goal." + Library.format("%-9s", name) + " " +
-      Library.format("%5sms", ms) + " " + theory + " " + line + ":" + offset + "  " + result
+    this.label(label) + " goal." + "%-9s".format(name) + " " +
+      "%5sms".format(ms) + " " + theory + " " + line + ":" + offset + "  " + result
 
   def finalize_line(label: String, summary: String): String = {
     val prefix = this.label(label) + " finalize   "

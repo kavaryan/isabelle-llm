@@ -167,10 +167,10 @@ class Bench_Probe(arms: List[Goals_Bench.Arm], k: Int, max_symbols: Int) extends
           val correct = os.flatMap(_.pass).map(_._1).sum
           val total = os.flatMap(_.pass).map(_._2).sum
           val pass1 = if (total == 0) 0.0 else 100.0 * correct / total
-          "pass@k " + solved + "/" + n + ", pass@1 " + Library.format("%.1f", pass1) + "%"
+          "pass@k " + solved + "/" + n + ", pass@1 " + "%.1f".format(pass1) + "%"
         case _ => "solved " + solved + "/" + n
       }
-      progress.echo(Library.format("%-12s", arm.label) + " " + summary)
+      progress.echo("%-12s".format(arm.label) + " " + summary)
       Goals_Output.finalize_line(arm.label, summary)
     }
 

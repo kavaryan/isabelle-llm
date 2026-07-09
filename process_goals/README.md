@@ -14,14 +14,17 @@ and acts on each goal through a **Probe** — the goal-level analogue of a stock
 
 ## Build & install
 
-Register the component once by adding its path to `etc/components`:
+Targets the official **Isabelle2025-2** release. Register the component once by
+adding its path to `etc/components`:
 
 ```
 echo "$PWD" >> "$(isabelle getenv -b ISABELLE_HOME_USER)/etc/components"
 ```
 
-Use the repo-local Isabelle (`../pide_mcp/isabelle/bin/isabelle`). The Scala sources
-compile on the first tool invocation (driven by `etc/build.props`); no manual build.
+The Scala sources compile on the first tool invocation (driven by `etc/build.props`);
+no manual build. Simplest way to get a matching Isabelle: `docker build -t
+goals .` (see `Dockerfile`) -- it starts from the official
+`makarius/isabelle:Isabelle2025-2` image, which already ships a prebuilt HOL heap.
 
 ## Usage
 
@@ -68,6 +71,48 @@ isabelle goals_bench \
 `-F` facts in the prompt, `-k` candidates/goal, `-c` symbols of preceding theory text
 (default 2000). The prompt template (`-L`'s third field) substitutes `{theory}`,
 `{goal}`, `{facts}`; `prompts/sft_prompt.txt` matches the model's training format.
+
+## Distillation pipeline (discover / oneshot / check / repair)
+
+Four probes chain into a pipeline that turns existing proofs into distillation data:
+an LLM attempts each goal one-shot; what it gets wrong is handed to a second LLM to
+repair interactively, through the same AutoCorrode I/R REPL `goals_repl` opens for
+manual exploration. Each phase reads the previous phase's output as its whitelist
+(`-W`) and writes goal-keyed JSON records (theory + line + offset) that the next
+phase looks up by position, verifying the source hasn't changed underneath it.
+
+| Probe      | Phase | Reads (`-W`)  | Does |
+|------------|-------|---------------|------|
+| `discover` | 1     | --            | Records goal positions + a source hash. |
+| `oneshot`  | 2     | phase 1       | One-shot proof attempt via an external adapter (any command that reads a prompt on stdin, writes a completion to stdout). |
+| `check`    | 3     | phase 2       | Verifies phase-2 proofs with `speculate_check_many`; keeps only the faulty ones. |
+| `repair`   | 4     | phase 3       | Opens an I/R REPL at each faulty goal and drives an external agent adapter with mini_ir MCP tools until it closes or gives up. |
+
+`repl` (no phase number) is the standalone building block behind `repair`: it opens
+one I/R REPL and waits for the goal to close, for interactive/manual use.
+
+Run the whole chain with `./run_pipeline.sh`:
+
+```
+IR_DIR=/path/to/AutoCorrode/ir ./run_pipeline.sh -m 3 HOL-Data_Structures.Sorted_Less
+```
+
+All configuration is via env vars (`ISABELLE`, `OUT_DIR`, `IR_DIR`, `ADAPTER_ONESHOT`,
+`ADAPTER_REPAIR`, `PROMPT_ONESHOT`, `PROMPT_REPAIR`, `MAX_SYMBOLS`,
+`CHECK_TIMEOUT_SECS`, `REPAIR_TIMEOUT_SECS`, `FORCE`) -- see the script header. Any
+positional args (theories, `-m`/`-s`/`-l`/`-d`/`-v`/...) are forwarded to every phase.
+Each phase's output file is reused if it already exists; set `FORCE=1` to rerun.
+Omit `IR_DIR` to run just phases 1-3 (no repair).
+
+`oneshot`/`repair`'s adapters are `adapters/opencode_adapter.sh` /
+`adapters/opencode_repair_adapter.sh` by default -- thin wrappers around the
+`opencode` CLI (see the scripts for the env vars they expect); swap in any adapter
+that reads a prompt on stdin and prints a completion on stdout. `repair`'s adapter
+gets an MCP server, `adapters/mini_ir_mcp.py` (tools: `step`, `back`, `text`,
+`find_theorems`, `sledgehammer`), pre-connected to the REPL opened for that goal.
+
+`IR_DIR` must point at [AutoCorrode](https://github.com/awslabs/AutoCorrode)'s `ir/`
+directory (`ir.ML`/`tcp_handler.ML`/`ml_repl.ML`/`repl.py`).
 
 ## Architecture
 

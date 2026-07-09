@@ -1,0 +1,141 @@
+# Theories of the book "Functional Data Structures and Algorithms" (https://fdsa-book.net/),
+# grouped by chapter, closed under session-local imports.
+# AFP sessions require the AFP component.
+
+# Chapter 2: Sorting
+HOL-Data_Structures.Sorting
+# build-fails (AFP 2026-06-16 vs this Isabelle): Efficient-Mergesort.Natural_Mergesort
+
+# Chapter 3: Selection
+HOL-Data_Structures.Selection
+
+# Chapter 4: Binary Trees
+HOL-Library.Tree
+HOL-Data_Structures.Tree2
+
+# Shared definitions and specs (chapters 5-10)
+HOL-Data_Structures.Cmp
+HOL-Data_Structures.Less_False
+HOL-Data_Structures.Sorted_Less
+HOL-Data_Structures.List_Ins_Del
+HOL-Data_Structures.AList_Upd_Del
+HOL-Data_Structures.Isin2
+HOL-Data_Structures.Lookup2
+
+# Chapter 5: Binary Search Trees
+HOL-Data_Structures.Tree_Set
+HOL-Data_Structures.Tree_Rotations
+HOL-Data_Structures.Interval_Tree
+
+# Chapter 6: Abstract Data Types
+HOL-Data_Structures.Set_Specs
+HOL-Data_Structures.Map_Specs
+HOL-Data_Structures.Tree_Map
+
+# Chapter 7: 2-3 Trees
+HOL-Data_Structures.Tree23
+HOL-Data_Structures.Tree23_Set
+HOL-Data_Structures.Tree23_of_List
+
+# Chapter 8: Red-Black Trees
+HOL-Data_Structures.RBT
+HOL-Data_Structures.RBT_Set
+HOL-Data_Structures.RBT_Set2
+HOL-Data_Structures.RBT_Map
+
+# Chapter 9: AVL Trees
+HOL-Data_Structures.AVL_Set_Code
+HOL-Data_Structures.AVL_Set
+HOL-Data_Structures.AVL_Bal_Set
+
+# Chapter 10: Beyond Insert and Delete: union, intersection, difference
+HOL-Data_Structures.Set2_Join
+HOL-Data_Structures.Set2_Join_RBT
+
+# Chapter 11: Arrays via Braun Trees
+HOL-Library.Tree_Real
+HOL-Data_Structures.Array_Specs
+HOL-Data_Structures.Braun_Tree
+HOL-Data_Structures.Array_Braun
+
+# Chapter 12: Tries
+HOL-Data_Structures.Trie_Fun
+HOL-Data_Structures.Tries_Binary
+HOL-Data_Structures.Trie_Ternary
+
+# Chapter 13: Region Quadtrees
+Region_Quadtrees.Quad_Base
+Region_Quadtrees.Quad_Tree
+Region_Quadtrees.Quad_Matrix
+Region_Quadtrees.KD_Region_Tree
+
+# Chapter 14: Priority Queues
+HOL-Library.Tree_Multiset
+HOL-Data_Structures.Priority_Queue_Specs
+HOL-Data_Structures.Heaps
+
+# Chapter 15: Leftist Heaps
+HOL-Data_Structures.Leftist_Heap
+
+# Chapter 16: Priority Queues via Braun Trees
+Priority_Queue_Braun.Priority_Queue_Braun
+
+# Chapter 17: Binomial Priority Queues
+HOL-Data_Structures.Binomial_Heap
+
+# Chapter 18: Dynamic Programming
+# build-fails (AFP 2026-06-16 vs this Isabelle): Monad_Memo_DP.Bellman_Ford
+# build-fails (AFP 2026-06-16 vs this Isabelle): Optimal_BST.Weighted_Path_Length
+# build-fails (AFP 2026-06-16 vs this Isabelle): Optimal_BST.Optimal_BST
+# build-fails (AFP 2026-06-16 vs this Isabelle): Optimal_BST.Quadrilateral_Inequality
+# build-fails (AFP 2026-06-16 vs this Isabelle): Optimal_BST.Optimal_BST2
+
+# Chapter 19: Amortized Analysis
+Amortized_Complexity.Lemmas_log
+Amortized_Complexity.Amortized_Framework
+Amortized_Complexity.Amortized_Examples
+Amortized_Complexity.Priority_Queue_ops_merge
+
+# Chapter 20: Queues
+HOL-Data_Structures.Queue_Spec
+HOL-Data_Structures.Queue_2Lists
+Hood_Melville_Queue.Hood_Melville_Queue
+
+# Chapter 21: Splay Trees
+Splay_Tree.Splay_Tree
+Amortized_Complexity.Splay_Tree_Analysis_Base
+Amortized_Complexity.Splay_Tree_Analysis
+
+# Chapter 22: Skew Heaps
+Skew_Heap.Skew_Heap
+Amortized_Complexity.Skew_Heap_Analysis
+
+# Chapter 23: Pairing Heaps
+Pairing_Heap.Pairing_Heap_Tree
+Pairing_Heap.Pairing_Heap_List2
+Amortized_Complexity.Pairing_Heap_Tree_Analysis
+Amortized_Complexity.Pairing_Heap_List2_Analysis
+
+# Chapter 24: Graph Algorithms
+Graph_Algorithms.Set_Addons
+Graph_Algorithms.Map_Addons
+Graph_Algorithms.Set2_Addons
+Graph_Algorithms.Pair_Graph
+Graph_Algorithms.Vwalk
+Graph_Algorithms.Dist
+Graph_Algorithms.Pair_Graph_Specs
+Graph_Algorithms.DFS
+Graph_Algorithms.BFS_2
+
+# Chapter 25: Knuth-Morris-Pratt String Search
+# build-fails (AFP 2026-06-16 vs this Isabelle): KnuthMorrisPratt.KnuthMorrisPratt
+
+# Chapter 26: Huffman's Algorithm
+Huffman.Huffman
+
+# Chapter 27: Alpha-Beta Pruning
+Alpha_Beta_Pruning.Alpha_Beta_Linear
+Alpha_Beta_Pruning.Alpha_Beta_Lattice
+
+# Appendices A/B: Time Functions
+HOL-Library.Time_Functions

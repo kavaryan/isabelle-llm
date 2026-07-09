@@ -11,7 +11,14 @@ sources = \
   src/goals_extract.scala \
   src/goals_filter.scala \
   src/goals_bench.scala \
-  src/goals_probe.scala
+  src/goals_probe.scala \
+  src/goals_ir_client.scala \
+  src/goals_repl.scala \
+  src/goals_hash.scala \
+  src/goals_discover.scala \
+  src/goals_check.scala \
+  src/goals_oneshot.scala \
+  src/goals_repair.scala
 services = \
   isabelle.goals.Goals_Extract_Tool \
   isabelle.goals.Goals_Filter_Tool \

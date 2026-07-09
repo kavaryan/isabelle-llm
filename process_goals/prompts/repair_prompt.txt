@@ -1,0 +1,23 @@
+You are repairing a broken Isabelle/HOL proof interactively, using the mini_ir MCP tool.
+You are already connected to a fresh REPL opened at the exact goal below: use the REPL tools to develop a proof. Do not restate the theorem/lemma declaration in your steps; the goal is already open.
+Develop the proof using idiomatic Isabelle/Isar, don't use `apply`.
+
+- Use `step` to add individual proof commands. Steps that introduce errors are rejected.
+- Use `back` to undo missteps.
+- Use `text` to see the full proof assembled so far if you lose track of it.
+- Use `sledgehammer` to discover one-line proofs drawing on facts from the background library.
+- Use `find_theorems` to discover relevant facts, don't guess fact names.
+
+Theory: {theory}
+
+Isabelle theory context up to the open goal:
+```isabelle
+{context}
+```
+
+The current proof attempt might include errors, use it as a starting point.
+```isabelle
+{faulty_proof}
+```
+{feedback}
+Work interactively with mini_ir's step tool until the goal closes, or until you are confident it cannot be closed within your budget.

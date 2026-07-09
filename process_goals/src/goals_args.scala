@@ -32,15 +32,23 @@ object Goals_Args {
     def progress: Console_Progress = new Console_Progress(verbose = verbose)
   }
 
-  // -s/-m: keep every Nth goal, at most N goals per theory
+  // -s/-m: keep every Nth goal, at most N goals per theory; -W: restrict to a
+  // whitelist file (any of the pipeline phase JSON outputs -- they all carry
+  // theory/line/offset, which is all whitelist_selector reads)
   class Selection {
     var stride: Int = 1
     var max_calls: Int = 0
+    var whitelist: Option[Path] = None
 
     val getopts: List[(String, String => Unit)] = List(
       "m:" -> (arg => max_calls = Value.Int.parse(arg)),
-      "s:" -> (arg => stride = Value.Int.parse(arg)))
+      "s:" -> (arg => stride = Value.Int.parse(arg)),
+      "W:" -> (arg => whitelist = Some(Path.explode(arg))))
 
-    def selector: Goals.Selector = Goals.default_selector(stride, max_calls)
+    def selector: Goals.Selector =
+      whitelist match {
+        case Some(file) => Goals.whitelist_selector(file)
+        case None => Goals.default_selector(stride, max_calls)
+      }
   }
 }

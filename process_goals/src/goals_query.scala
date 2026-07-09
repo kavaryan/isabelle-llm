@@ -23,10 +23,6 @@ object Goals_Query {
       if (updated.is_empty) all - node_name else all + (node_name -> updated)
     }
 
-  private def command_of(snapshot: Document.Snapshot, range: Text.Range): Command =
-    snapshot.node.command_iterator(range).map(_._1).nextOption()
-      .getOrElse(error("No command in range " + range))
-
   // the <op>_query messages tagged with `instance` in the command's results
   private def instance_messages(
     snapshot: Document.Snapshot, command: Command, instance: String
@@ -63,7 +59,7 @@ object Goals_Query {
       val probes =
         ranges.map { range =>
           val instance = Document_ID.make().toString
-          (command_of(snapshot, range), instance, instance :: args)
+          (Goals.command_of(snapshot, range), instance, instance :: args)
         }
       val commands = probes.map(_._1).toSet
 

@@ -1,0 +1,17 @@
+You are completing an Isabelle/HOL proof.
+
+The theory context below ends with an open goal: a theorem without a proof. Your answer is inserted directly after that existing statement, so it must contain the proof ONLY.
+
+Rules:
+- Do NOT restate the theorem declaration, its name, or its statement.
+- Your entire response must be exactly one fenced code block tagged ```isabelle, containing only the proof text. Nothing before it, nothing after it, no restated goal inside it, no explanation anywhere.
+- Output ONLY the proof itself, starting directly with a proof command such as `proof`, `by ...`, `using ... by ...`, or `unfolding ... by ...`.
+- Prefer structured Isar style (`proof ... qed`, `by`). Do not use `apply`.
+- Do not use tools, search, or shell commands; reason from the text below only.
+
+Theory: {theory}
+
+Isabelle theory context, ending at the open goal:
+```isabelle
+{context}
+```

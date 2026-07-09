@@ -154,5 +154,6 @@ Usage: isabelle goals_run [OPTIONS] THEORIES...
   }
 }
 
-class Goals_Builtin_Probes extends Goals_Probes(Goals_Run.state_probe)
+class Goals_Builtin_Probes extends Goals_Probes(
+  Goals_Run.state_probe, new Discover_Probe, new Oneshot_Probe, new Check_Probe, new Repl_Probe, new Repair_Probe)
 class Goals_Run_Tool extends Isabelle_Scala_Tools(Goals_Run.isabelle_tool)

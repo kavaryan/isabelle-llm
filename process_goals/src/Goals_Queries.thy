@@ -75,7 +75,7 @@ val _ =
         | NONE => "0"));
 \<close>
 
-ML ‹
+ML \<open>
 (* "1"/"" whether a single try0 method closes the goal *)
 val _ =
   register_proof_query "try0_closes"
@@ -85,9 +85,9 @@ val _ =
         val ((found, _), _) =
           Try0.generic_try0 Try0.Try (SOME (Time.fromSeconds secs)) Try0.empty_facts proof;
       in writeln_result (if found then "1" else "") end);
-›
+\<close>
 
-ML ‹
+ML \<open>
 (* "1"/"" whether sledgehammer closes the goal; kind = "methods" (tactic provers only)
    or "all". Driven like the interactive sledgehammer (silence_state, same params). *)
 local
@@ -122,7 +122,7 @@ in
             Thm.nprems_of (#goal (Proof.goal proof)) <= 1 andalso run_hammer kind secs proof
         in writeln_result (if solved then "1" else "") end);
 end
-›
+\<close>
 
 ML \<open>
 (* batch: run each candidate on the goal state; "1" iff it discharges all current goals.
@@ -135,7 +135,7 @@ val _ =
           (case args of t :: cs => (the_default 5 (Int.fromString t), cs) | _ => (5, []));
         fun run_all [] s = SOME s
           | run_all (tr :: r) s =
-              (case Toplevel.command_errors tr s of ([], SOME s') => run_all r s' | _ => NONE);
+              (case Toplevel.command_errors false tr s of ([], SOME s') => run_all r s' | _ => NONE);
         fun discharged s' =
           not (Toplevel.is_proof s') orelse
           (case try Toplevel.proof_of s' of SOME p => can Proof.assert_forward p | NONE => true);
@@ -143,9 +143,13 @@ val _ =
           let val trs = Outer_Syntax.parse_text (Toplevel.theory_of st) (K (Toplevel.theory_of st)) Position.start c in
             not (null trs)
             andalso not (exists (fn tr => member (op =) ["sorry", "oops"] (Toplevel.name_of tr)) trs)
-            andalso (case Interactive.setmp_parallel_proofs 0
-                (Timeout.apply (Time.fromSeconds secs) (fn () => run_all trs st)) () of
-              SOME s' => discharged s' | NONE => false)
+            andalso
+              (let
+                 val old_parallel_proofs = ! Multithreading.parallel_proofs
+                 val _ = Multithreading.parallel_proofs := Int.min (0, old_parallel_proofs)
+                 val result = Timeout.apply (Time.fromSeconds secs) (fn () => run_all trs st) ()
+                 val _ = Multithreading.parallel_proofs := old_parallel_proofs
+               in (case result of SOME s' => discharged s' | NONE => false) end)
           end handle Timeout.TIMEOUT _ => false | ERROR _ => false;
       in writeln_result (cat_lines (Par_List.map (fn c => if closes c then "1" else "0") cands)) end);
 \<close>

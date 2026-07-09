@@ -20,6 +20,10 @@ object Goals {
   // whole seconds for an ML operation's timeout argument (at least 1)
   def timeout_secs(timeout: Time): String = Math.max(1, timeout.seconds.ceil.toInt).toString
 
+  def command_of(snapshot: Document.Snapshot, range: Text.Range): Command =
+    snapshot.node.command_iterator(range).map(_._1).nextOption()
+      .getOrElse(error("No command in range " + range))
+
   // theory names from a file: one per line, blanks and #-comments skipped
   def read_theories(file: Path): List[String] =
     Library.trim_split_lines(File.read(file)).filterNot(s => s.isEmpty || s.startsWith("#"))
@@ -102,7 +106,9 @@ object Goals {
 
   // per-theory data shared across that theory's goals (computed once, read concurrently);
   // command offsets index into `source` by character
-  final case class Structure(cmds: List[(Command, Int)], blocks: List[(Int, Int)], source: String)
+  final case class Structure(cmds: List[(Command, Int)], blocks: List[(Int, Int)], source: String) {
+    lazy val source_hash: String = Goals_Hash.sha256(source)
+  }
 
   def structure(snapshot: Document.Snapshot): Structure = {
     val cmds = proper(snapshot)
@@ -195,7 +201,7 @@ object Goals {
       Build.build(options, selection = Sessions.Selection.session(background.session_name),
         build_heap = true, dirs = dirs, infos = background.infos, progress = progress).check
       // show_states only on the interactive session: goal_state reads it from command markup
-      val resources = Headless.Resources(options + "show_states=true", background, Logger.console)
+      val resources = Headless.Resources(options + "show_states=true", background, new System_Logger())
       val session = resources.start_session(progress = progress)
       try {
         if (!session.use_theories(List("Goals_Queries"),
