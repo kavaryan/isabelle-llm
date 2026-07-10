@@ -59,9 +59,13 @@ class Oneshot_Probe extends JSON_Probe {
           case Exn.Res(response) =>
             val proof_text = Oneshot_Prompt.extract_proof(response)
             record(if (proof_text.nonEmpty) "extracted" else "no_code_block",
-              "adapter" -> adapter, "context_chars" -> context.length,
+              "adapter" -> adapter, "prompt_file" -> prompt_file,
+              "context_chars" -> context.length, "context" -> context, "prompt" -> prompt,
               "raw_response" -> response, "proof_text" -> proof_text)
-          case Exn.Exn(exn) => record("error", "adapter" -> adapter, "error" -> Exn.message(exn))
+          case Exn.Exn(exn) => record("error",
+            "adapter" -> adapter, "prompt_file" -> prompt_file,
+            "context_chars" -> context.length, "context" -> context, "prompt" -> prompt,
+            "error" -> Exn.message(exn))
         }
       }
     }

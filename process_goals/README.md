@@ -1,3 +1,11 @@
+# How to run
+```
+# Adjust the parameter of the following script (sp at set -- -m 10 HOL-Lattice.CompleteLattice) and run
+./run-distillation-full.sh 
+
+python3 ../sft/distillation/distillation-data/visualise-history.py   pipeline_smoke_out/05_joined.json
+```
+
 # goals — theory-goal tools (extract / filter / bench / run)
 
 A self-contained Isabelle component, built on stock Pure only (`ISABELLE_SCALA_JAR`).
@@ -97,12 +105,29 @@ Run the whole chain with `./run_pipeline.sh`:
 IR_DIR=/path/to/AutoCorrode/ir ./run_pipeline.sh -m 3 HOL-Data_Structures.Sorted_Less
 ```
 
+For a ten-goal DeepSeek V4 Pro smoke run, put `OPENCODE_API_KEY=...` in
+`~/.opencode-api-key` and run `./run_pipeline.sh --smoketest`. The smoke run uses
+`opencode/deepseek-v4-pro` for both one-shot and interactive repair,
+loads Isabelle, checks every candidate, and opens the live I/R repair session for
+each failed one-shot when `IR_DIR` is set.
+
 All configuration is via env vars (`ISABELLE`, `OUT_DIR`, `IR_DIR`, `ADAPTER_ONESHOT`,
 `ADAPTER_REPAIR`, `PROMPT_ONESHOT`, `PROMPT_REPAIR`, `MAX_SYMBOLS`,
 `CHECK_TIMEOUT_SECS`, `REPAIR_TIMEOUT_SECS`, `FORCE`) -- see the script header. Any
 positional args (theories, `-m`/`-s`/`-l`/`-d`/`-v`/...) are forwarded to every phase.
-Each phase's output file is reused if it already exists; set `FORCE=1` to rerun.
-Omit `IR_DIR` to run just phases 1-3 (no repair).
+Each completed phase is reused when its marker still matches; set `FORCE=1` to
+rerun everything. Omit `IR_DIR` to run just phases 1-3 (no repair).
+
+A phase is reused only when its `.complete.json` marker matches the output's
+checksum and record count. An interrupted phase is rerun, along with every
+downstream phase. On completion the pipeline also writes `05_joined.json`,
+`06_stats.json`, and `pipeline_run.json` (configuration, revision, timestamps,
+record counts, and artifact checksums). View the joined rows with:
+
+```
+python3 ../sft/distillation/distillation-data/visualise-history.py \
+  pipeline_out/05_joined.json
+```
 
 `oneshot`/`repair`'s adapters are `adapters/opencode_adapter.sh` /
 `adapters/opencode_repair_adapter.sh` by default -- thin wrappers around the

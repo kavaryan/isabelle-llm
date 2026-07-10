@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve a small browser UI for mini_ir repair rollout JSONL files."""
+"""Serve a browser UI for old rollout JSONL or process_goals joined JSON."""
 
 from __future__ import annotations
 
@@ -17,23 +17,32 @@ from urllib.parse import parse_qs, urlparse
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("jsonl", type=Path, help="Step-4 rollout JSONL file")
+    parser.add_argument("jsonl", type=Path, help="rollout JSONL or 05_joined.json")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8769)
     parser.add_argument("--no-open", action="store_true")
+    parser.add_argument("--check", action="store_true", help="parse and render every row, then exit")
     return parser.parse_args()
 
 
 def read_rows(path: Path) -> list[dict]:
+    text = path.read_text(encoding="utf-8")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, list):
+        if not all(isinstance(row, dict) for row in payload):
+            raise ValueError(f"{path} JSON array must contain objects")
+        return [dict(row, _line_no=index) for index, row in enumerate(payload, start=1)]
     rows: list[dict] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line_no, line in enumerate(handle, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            row["_line_no"] = line_no
-            rows.append(row)
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        row["_line_no"] = line_no
+        rows.append(row)
     return rows
 
 
@@ -360,6 +369,85 @@ def render_row(row: dict, idx: int, total: int, filename: str) -> str:
     repair_transcript = row.get("mini_ir_transcript_markdown")
     repair_transcript_toc = render_transcript_toc(str(repair_transcript or ""))
     repair_transcript_html = render_transcript_markdown(str(repair_transcript or ""))
+    answer = str(row.get("answer") or "")
+    answer_check = "\n".join(
+        str(value) for value in (
+            row.get("answer_check_output"), row.get("answer_isabelle_error"), row.get("answer_isabelle_notes")
+        ) if value
+    )
+    oneshot_check = "\n".join(
+        str(value) for value in (row.get("oneshot_isabelle_error"), row.get("oneshot_isabelle_notes")) if value
+    )
+    if row.get("oneshot_isabelle_ok") is True and not row.get("oneshot_isabelle_error"):
+        oneshot_check = "Accepted by live speculate_check_many."
+
+    repair_attempted = isinstance(row.get("repair"), dict) or any(
+        row.get(name) not in (None, "") for name in (
+            "mini_ir_prompt", "mini_ir_response", "mini_ir_extracted_proof",
+            "mini_ir_events_jsonl", "mini_ir_transcript_markdown",
+        )
+    )
+    answer_html = (
+        f"<pre>{esc(answer)}</pre>" if answer
+        else '<div class="empty-state">Original proof was not captured in this older rollout.</div>'
+    )
+    answer_check_html = (
+        f"<pre>{esc(answer_check)}</pre>" if answer_check
+        else '<div class="empty-state">Not run by the goal-native pipeline.</div>'
+    )
+    oneshot_check_html = (
+        f"<pre>{esc(oneshot_check)}</pre>" if oneshot_check
+        else '<div class="empty-state">No checker output was recorded.</div>'
+    )
+
+    if repair_attempted:
+        repair_check = "\n".join(
+            str(value) for value in (row.get("mini_ir_check_output"), row.get("mini_ir_isabelle_error"),
+                                     row.get("mini_ir_isabelle_notes")) if value
+        )
+        if row.get("mini_ir_isabelle_ok") is True and not row.get("mini_ir_isabelle_error"):
+            repair_check = "Accepted by live speculate_check_many."
+        repair_toc = f"""
+        <a href="#step4">Step 4 · Repair</a>
+        <a class="sub" href="#step4-prompt">Prompt</a>
+        <a class="sub" href="#step4-response">Final response</a>
+        <a class="sub" href="#step4-proof">Extracted proof</a>
+        <a class="sub" href="#step4-events">Transcript</a>
+        {repair_transcript_toc}
+        <a href="#step5">Step 5 · Repair check</a>
+        <a class="sub" href="#step5-output">Isabelle output</a>
+        <a class="sub" href="#step5-theory">Checked theory</a>
+        """
+        repair_sections = f"""
+      <section id="step4" class="block">
+        <h2>Step 4 · Repair</h2>
+        <h2 id="step4-prompt">Prompt</h2>
+        <pre>{esc(row.get("mini_ir_prompt", ""))}</pre>
+        <h2 id="step4-response">Final Response</h2>
+        <pre>{esc(row.get("mini_ir_response", ""))}</pre>
+        <h2 id="step4-proof">Extracted Proof</h2>
+        <pre>{esc(row.get("mini_ir_extracted_proof", ""))}</pre>
+      </section>
+      <section id="step4-events" class="block">
+        <h2>Step 4 · Transcript</h2>
+        {repair_transcript_html if repair_transcript else repair_cards}
+      </section>
+      <section id="step5" class="block">
+        <h2>Step 5 · Repair Check</h2>
+        <h2 id="step5-output">Isabelle Output</h2>
+        <pre>{esc(repair_check)}</pre>
+        <h2 id="step5-theory">Checked Theory</h2>
+        <pre>{esc(row.get("mini_ir_checked_theory_text", ""))}</pre>
+      </section>
+        """
+    else:
+        repair_toc = '<a href="#step4">Step 4 · Repair not attempted</a>'
+        repair_sections = """
+      <section id="step4" class="block">
+        <h2>Step 4 · Repair not attempted</h2>
+        <div class="empty-state success">The one-shot proof passed Isabelle, so no repair session was opened.</div>
+      </section>
+        """
 
     return f"""<!doctype html>
 <html>
@@ -543,6 +631,14 @@ def render_row(row: dict, idx: int, total: int, filename: str) -> str:
       background: rgba(255,255,255,.02);
       font-size: 12px;
     }}
+    .empty-state {{
+      padding: 12px;
+      color: var(--muted);
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+    }}
+    .empty-state.success {{ color: var(--ok); border-color: rgba(63, 185, 80, .5); }}
     .code-label {{
       padding: 10px 12px 6px;
       color: var(--muted);
@@ -576,7 +672,7 @@ def render_row(row: dict, idx: int, total: int, filename: str) -> str:
 <body>
   <header>
     <div class="bar">
-      <h1>Distillation pipeline based on smoke_*.jsonl · row {idx + 1} / {total}</h1>
+      <h1>Distillation pipeline · {esc(Path(filename).name)} · row {idx + 1} / {total}</h1>
       <div class="nav">
         <a href="/?row={max(0, idx - 1)}">Prev</a>
         <a href="/">First</a>
@@ -599,15 +695,7 @@ def render_row(row: dict, idx: int, total: int, filename: str) -> str:
         <a href="#step3">Step 3 · Check</a>
         <a class="sub" href="#step3-answer">Answer sanity check</a>
         <a class="sub" href="#step3-error">Isabelle output</a>
-        <a href="#step4">Step 4 · Repair</a>
-        <a class="sub" href="#step4-prompt">Prompt</a>
-        <a class="sub" href="#step4-response">Final response</a>
-        <a class="sub" href="#step4-proof">Extracted proof</a>
-        <a class="sub" href="#step4-events">Transcript</a>
-        {repair_transcript_toc}
-        <a href="#step5">Step 5 · Repair check</a>
-        <a class="sub" href="#step5-output">Isabelle output</a>
-        <a class="sub" href="#step5-theory">Checked theory</a>
+        {repair_toc}
       </nav>
       <div class="kv">
         <div class="k">theory</div><div class="v">{esc(row.get("theory"))}</div>
@@ -622,7 +710,7 @@ def render_row(row: dict, idx: int, total: int, filename: str) -> str:
         <h2 id="original-question">Question</h2>
         <pre>{esc(row.get("question", ""))}</pre>
         <h2 id="original-answer">Answer</h2>
-        <pre>{esc(row.get("answer", ""))}</pre>
+        {answer_html}
       </section>
       <section id="step2" class="block">
         <h2>Step 2 · One-shot Rollout</h2>
@@ -640,30 +728,11 @@ def render_row(row: dict, idx: int, total: int, filename: str) -> str:
       <section id="step3" class="block">
         <h2>Step 3 · One-shot Check</h2>
         <h2 id="step3-answer">Answer Sanity Check</h2>
-        <pre>{esc((row.get("answer_check_output") or row.get("answer_isabelle_error") or "") + "\\n" + (row.get("answer_isabelle_notes") or ""))}</pre>
+        {answer_check_html}
         <h2 id="step3-error">Isabelle Output</h2>
-        <pre>{esc((row.get("oneshot_isabelle_error") or "") + "\\n" + (row.get("oneshot_isabelle_notes") or ""))}</pre>
+        {oneshot_check_html}
       </section>
-      <section id="step4" class="block">
-        <h2>Step 4 · Repair</h2>
-        <h2 id="step4-prompt">Prompt</h2>
-        <pre>{esc(row.get("mini_ir_prompt", ""))}</pre>
-        <h2 id="step4-response">Final Response</h2>
-        <pre>{esc(row.get("mini_ir_response", ""))}</pre>
-        <h2 id="step4-proof">Extracted Proof</h2>
-        <pre>{esc(row.get("mini_ir_extracted_proof", ""))}</pre>
-      </section>
-      <section id="step4-events" class="block">
-        <h2>Step 4 · Transcript</h2>
-        {repair_transcript_html if repair_transcript else repair_cards}
-      </section>
-      <section id="step5" class="block">
-        <h2>Step 5 · Repair Check</h2>
-        <h2 id="step5-output">Isabelle Output</h2>
-        <pre>{esc((row.get("mini_ir_check_output") or row.get("mini_ir_isabelle_error") or "") + "\\n" + (row.get("mini_ir_isabelle_notes") or ""))}</pre>
-        <h2 id="step5-theory">Checked Theory</h2>
-        <pre>{esc(row.get("mini_ir_checked_theory_text", ""))}</pre>
-      </section>
+      {repair_sections}
     </div>
   </main>
 </body>
@@ -712,6 +781,12 @@ def main() -> int:
     if not rows:
         print(f"error: no rows in {args.jsonl}", file=sys.stderr)
         return 1
+
+    if args.check:
+        for index, row in enumerate(rows):
+            render_row(row, index, len(rows), str(args.jsonl))
+        print(f"Validated {args.jsonl} ({len(rows)} rows)")
+        return 0
 
     Handler.rows = rows
     Handler.filename = str(args.jsonl)

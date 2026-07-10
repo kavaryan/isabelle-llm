@@ -50,7 +50,10 @@ class Repair_Probe extends JSON_Probe {
     val repl_id = "goals_repair_" + c.theory + "_" + c.site.line + "_" + Time.now().ms
 
     new IR_Launcher(c.session, msg => c.progress.echo(c.tag + " " + msg)).launch(ir_dir) match {
-      case Left(err) => result(c, hash, "repl_launch_failed", "error" -> err)
+      case Left(err) => result(c, hash, "repl_launch_failed",
+        "adapter" -> adapter, "prompt_file" -> prompt_file,
+        "context_chars" -> context.length, "context" -> context, "prompt" -> prompt,
+        "error" -> err)
       case Right(launched) =>
         IR_Launcher.with_repl(launched, repl_id, command) { client =>
           val env = List(
@@ -76,6 +79,8 @@ class Repair_Probe extends JSON_Probe {
 
           result(c, hash, if (success) "repaired" else "unrepaired",
             "faulty_proof" -> faulty_proof, "faulty_error" -> faulty_error,
+            "adapter" -> adapter, "prompt_file" -> prompt_file,
+            "context_chars" -> context.length, "context" -> context, "prompt" -> prompt,
             "final_proof_text" -> final_proof_text, "success" -> success,
             "transcript" -> transcript, "adapter_final_text_hint" -> final_text_hint,
             "adapter_error" -> adapter_error)

@@ -16,5 +16,6 @@ class Discover_Probe extends JSON_Probe {
   def apply(c: Probe.Context): Option[JSON.T] =
     Some(JSON.Object(
       "theory" -> c.theory, "line" -> c.site.line, "offset" -> c.site.offset,
-      "command" -> c.site.name, "file_hash" -> c.struct.source_hash))
+      "command" -> c.site.name, "file_hash" -> c.struct.source_hash,
+      "answer" -> c.block.block))
 }

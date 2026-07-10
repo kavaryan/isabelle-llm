@@ -1,1 +1,3 @@
 lib/*.jar
+pipeline_out/
+pipeline_smoke_out/
