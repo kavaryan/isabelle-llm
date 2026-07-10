@@ -62,7 +62,9 @@ Usage: isabelle goals_extract [OPTIONS] THEORIES...
   Options are:
     -A           exclude proofs containing any 'apply' command
     -F FACTS     relevant facts per goal (default 0 = none)
+    -G           restrict to top-level goals (not nested inside another proof block)
     -L           keep only leaf proofs (innermost block has no nested sub-proof)
+    -N           restrict to nested goals (excludes one-liners like 'by simp'/'unfolding x by simp')
     -O DIR       output directory (default goals_extract)
     -T FILE      read theory names from FILE (one per line, # comments); repeatable
     -c N         limit preceding theory text to its last N symbols (0 = full)

@@ -84,7 +84,6 @@ object Goals_Bench {
       var max_symbols = 2000
       var timeout = Time.seconds(30.0)
       var out = Path.explode("goals_bench")
-      var whitelist: Option[Path] = None
 
       val getopts = Getopts("""
 Usage: isabelle goals_bench [OPTIONS] THEORIES...
@@ -92,7 +91,9 @@ Usage: isabelle goals_bench [OPTIONS] THEORIES...
   Options are:
     -A NAME      stock arm: try0 | sledgehammer | sledgehammer:methods  (repeatable)
     -F N         max facts in the LLM prompt (default 16)
+    -G           restrict to top-level goals (not nested inside another proof block)
     -L SPEC      LLM arm; SPEC = LABEL,URL,PROMPT_FILE                   (repeatable)
+    -N           restrict to nested goals (excludes one-liners like 'by simp'/'unfolding x by simp')
     -O DIR       output directory for bench.log (default goals_bench)
     -T FILE      read theory names from FILE (one per line, # comments); repeatable
     -W FILE      restrict to goals in a hard-set whitelist (goals_filter output)
@@ -116,7 +117,6 @@ Usage: isabelle goals_bench [OPTIONS] THEORIES...
             case List(label, url, prompt) => (label, url, prompt)
             case _ => error("bad -L spec (LABEL,URL,PROMPT_FILE): " + arg) })),
           "O:" -> (arg => out = Path.explode(arg)),
-          "W:" -> (arg => whitelist = Some(Path.explode(arg))),
           "c:" -> (arg => max_symbols = Value.Int.parse(arg)),
           "k:" -> (arg => k = Value.Int.parse(arg)),
           "t:" -> (arg => timeout = Time.seconds(Value.Double.parse(arg))))): _*)
@@ -127,14 +127,10 @@ Usage: isabelle goals_bench [OPTIONS] THEORIES...
         actions.map(action_arm(_, timeout)) :::
         llms.map { case (label, url, prompt) => LLM_Arm(label, url, File.read(Path.explode(prompt))) }
       if (arms.isEmpty) error("no arms: pass at least one -A or -L")
-      val select = whitelist match {
-        case Some(file) => Goals.whitelist_selector(file)
-        case None => selection.selector
-      }
       val probe = new Bench_Probe(arms, k, max_symbols)
       val progress = common.progress
       progress.interrupt_handler {
-        Goals_Run.run(common.logic, common.dirs, common.options, theories, select,
+        Goals_Run.run(common.logic, common.dirs, common.options, theories, selection.selector,
           probe, Nil, max_facts, timeout, out, progress)
       }
     })

@@ -12,6 +12,8 @@ class Repl_Probe extends JSON_Probe {
   def name = "repl"
   override def description =
     "open an AutoCorrode I/R REPL at one goal (in-session; args: ir_dir [wait_secs])"
+  // IR_Launcher.launch races on session-wide protocol-handler state
+  override def parallel = false
 
   // Ir.state pretty-prints the toplevel (plus a trailing [timing] line): non-empty
   // while a proof is open (even "No subgoals!" -- goal discharged but still

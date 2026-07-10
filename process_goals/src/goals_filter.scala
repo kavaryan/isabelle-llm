@@ -71,9 +71,11 @@ Usage: isabelle goals_filter [OPTIONS] THEORIES...
 
   Options are:
     -A           exclude proofs containing any 'apply' command
+    -G           restrict to top-level goals (not nested inside another proof block)
     -H           also try sledgehammer (drop goals it closes)
     -L           keep only leaf proofs (innermost block has no nested sub-proof)
     -M           sledgehammer with built-in proof methods only
+    -N           restrict to nested goals (excludes one-liners like 'by simp'/'unfolding x by simp')
     -O FILE      output whitelist JSON (default hard_goals.json)
     -T FILE      read theory names from FILE (one per line, # comments); repeatable
     -d DIR       include session directory

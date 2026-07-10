@@ -17,6 +17,9 @@ trait Probe[A] {
   def name: String
   def description: String = ""
 
+  // override to false if the probe can't share state across concurrent goals
+  def parallel: Boolean = true
+
   // run on each goal; return a record to collect, or None to drop the goal
   def apply(context: Probe.Context): Option[A]
 
@@ -78,7 +81,7 @@ object Goals_Run {
       val struct = Goals.structure(snapshot)
       val theory = Goals.theory_name(node_name)
       val theory_records =
-        Goals.map_goals(select, session, node_name, snapshot, progress) { site =>
+        Goals.map_goals(select, session, node_name, snapshot, progress, probe.parallel) { site =>
           probe(Probe.Context(session, snapshot, struct, site, theory, args, max_facts, timeout, progress))
         }.flatten
       val all = collected.change_result(acc => { val a = acc ::: theory_records; (a, a) })
@@ -106,6 +109,8 @@ Usage: isabelle goals_run [OPTIONS] THEORIES...
   Options are:
     -A ARG       extra argument passed to the probe (repeatable)
     -F N         max facts available to the probe (default 16)
+    -G           restrict to top-level goals (not nested inside another proof block)
+    -N           restrict to nested goals (excludes one-liners like 'by simp'/'unfolding x by simp')
     -O FILE      output file (default goals_run.json)
     -P NAME      probe to run; omit or "list" to list registered probes
     -T FILE      read theory names from FILE (one per line, # comments); repeatable

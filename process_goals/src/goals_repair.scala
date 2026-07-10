@@ -22,6 +22,8 @@ object Repair_Prompt {
 class Repair_Probe extends JSON_Probe {
   def name = "repair"
   override def description = "phase 4: interactive repair via goals_repl + an external agent adapter; records the full trace"
+  // IR_Launcher.launch races on session-wide protocol-handler state
+  override def parallel = false
 
   private val prior = new Path_Cache(Goals_Output.read_records_by_position)
   private val prompt_template = new Path_Cache(File.read)

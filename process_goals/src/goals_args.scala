@@ -34,13 +34,19 @@ object Goals_Args {
 
   // -s/-m: keep every Nth goal, at most N goals per theory; -W: restrict to a
   // whitelist file (any of the pipeline phase JSON outputs -- they all carry
-  // theory/line/offset, which is all whitelist_selector reads)
+  // theory/line/offset, which is all whitelist_selector reads); -G/-N: restrict
+  // to top-level / nested goals (ignored together with -W, which already
+  // reads a fixed set of positions)
   class Selection {
     var stride: Int = 1
     var max_calls: Int = 0
     var whitelist: Option[Path] = None
+    var top_level_only: Boolean = false
+    var nested_only: Boolean = false
 
     val getopts: List[(String, String => Unit)] = List(
+      "G" -> (_ => top_level_only = true),
+      "N" -> (_ => nested_only = true),
       "m:" -> (arg => max_calls = Value.Int.parse(arg)),
       "s:" -> (arg => stride = Value.Int.parse(arg)),
       "W:" -> (arg => whitelist = Some(Path.explode(arg))))
@@ -48,7 +54,7 @@ object Goals_Args {
     def selector: Goals.Selector =
       whitelist match {
         case Some(file) => Goals.whitelist_selector(file)
-        case None => Goals.default_selector(stride, max_calls)
+        case None => Goals.default_selector(stride, max_calls, top_level_only, nested_only)
       }
   }
 }

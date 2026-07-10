@@ -116,8 +116,11 @@ object Goals {
   }
 
   // the proof block enclosing the step command at source offset `off`
-  final case class Block_Info(block: String, commands: List[String], is_leaf: Boolean, has_apply: Boolean)
-  object Block_Info { val empty: Block_Info = Block_Info("", Nil, is_leaf = true, has_apply = false) }
+  final case class Block_Info(
+    block: String, commands: List[String], is_leaf: Boolean, has_apply: Boolean, top_level: Boolean)
+  object Block_Info {
+    val empty: Block_Info = Block_Info("", Nil, is_leaf = true, has_apply = false, top_level = false)
+  }
 
   def block_info(struct: Structure, off: Int): Block_Info = {
     val cmds = struct.cmds
@@ -130,11 +133,13 @@ object Goals {
         val inner = containing.minBy { case (s, e) => e - s }
         val is_leaf = !struct.blocks.exists(b => b != inner && inner._1 <= b._1 && b._2 <= inner._2)
         val has_apply = cmds.slice(inner._1, inner._2 + 1).exists(_._1.span.name == "apply")
+        val top_level =
+          cmds(inner._1)._1.span.kind.keyword_kind.exists(Keyword.theory_goal.contains)
         // contiguous source from the step to the end of the block, preserving whitespace
         val stop = if (inner._2 + 1 < cmds.length) cmds(inner._2 + 1)._2 else struct.source.length
         val block = struct.source.substring(off, stop).nn
         val commands = cmds.slice(idx, inner._2 + 1).map(_._1.source.trim.nn).filter(_.nonEmpty)
-        Block_Info(block, commands, is_leaf, has_apply)
+        Block_Info(block, commands, is_leaf, has_apply, top_level)
       }
     }
   }
@@ -142,9 +147,19 @@ object Goals {
   // a Selector turns a checked snapshot into the goals to act on
   type Selector = (Session, Document.Node.Name, Document.Snapshot) => List[Site]
 
-  def default_selector(stride: Int = 1, max_calls: Int = 0): Selector =
+  // top_level_only/nested_only restrict by Block_Info.top_level / !(is_leaf && !has_apply)
+  def default_selector(
+    stride: Int = 1, max_calls: Int = 0, top_level_only: Boolean = false, nested_only: Boolean = false
+  ): Selector =
     (session, _, snapshot) => {
-      val cands = candidate_sites(snapshot)
+      val struct = structure(snapshot)
+      val all_cands = candidate_sites(snapshot)
+      val cands =
+        if (!top_level_only && !nested_only) all_cands
+        else all_cands.filter { s =>
+          val info = block_info(struct, s.offset - 1)
+          (!top_level_only || info.top_level) && (!nested_only || !(info.is_leaf && !info.has_apply))
+        }
       // the selectable batch processes one overlay per candidate, so scale its budget
       val timeout = Time.seconds(30.0 + 0.1 * cands.length)
       val verdicts =
