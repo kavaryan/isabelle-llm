@@ -1,84 +1,58 @@
-# Isabelle/HOL LLM Integration
+# Isabelle LLM
 
-This repository provides tools and plugins to integrate Large Language Models (LLMs) with the Isabelle/HOL interactive theorem prover. It supports both offline training data extraction and online interactive proof assistance.
+Research tooling for LLM-assisted proof development in Isabelle/HOL. The
+repository covers proof-data extraction, goal processing and evaluation,
+supervised and verifier-guided training, semantic retrieval, and interactive
+proof assistance.
 
-## Directory Structure
+The modules can be used independently; there is no single repository-wide
+build or runtime.
 
-*   [extractor/](extractor): A custom Isabelle component and Scala/ML CLI tool (`isabelle proof_extractor`) to extract proof-step datasets (enclosing proof blocks, goal states, tactics, and relevance-filtered sledgehammer facts) from Isabelle theories into structured JSON files.
-*   [jedit-plugin/](jedit-plugin): An Isabelle/jEdit IDE plugin that adds a panel to suggest real-time tactics and proofs using local or remote LLM backends.
-*   [sft/](sft): Supervised Fine-Tuning (SFT) resources, including prompt templates for formatting extracted proof pairs into LLM instruction-following datasets.
+## Components
 
----
+| Path | Purpose |
+| --- | --- |
+| [`extractor/`](extractor/) | Isabelle component exposing `isabelle proof_extractor` for exporting proof steps, goal states, enclosing proof blocks, and relevance-filtered facts as JSON. |
+| [`process_goals/`](process_goals/) | Isabelle2025-2 tools for goal extraction, filtering, benchmarking, distillation, checking, and repair. |
+| [`thm_export/`](thm_export/) | Scala utility for exporting theorem names, source statements, and source locations from a built Isabelle session. |
+| [`sft/`](sft/) | Dataset preparation, prompt-template modules, and Slurm jobs for supervised fine-tuning and evaluation. |
+| [`rl/`](rl/) | Verifier-reward GRPO experiments and Slurm training utilities. |
+| [`repl/`](repl/) | Interactive Isar frontend and `mini_ir` MCP bridge for the AutoCorrode I/R backend. |
+| [`semantic-search/`](semantic-search/) | Prototype theorem-embedding and proof-dependency retrieval benchmark. |
+| [`jedit-plugin/`](jedit-plugin/) | Isabelle/jEdit panel for requesting and optionally verifying LLM proof suggestions. |
 
-## Supervised Fine-Tuning (SFT) Template
+## Proof extraction quick start
 
-Prompt templates format extracted proof pairs for training. The standard non-thinking template is located at [sft/non_thinking_prompt.py](sft/non_thinking_prompt.py) and defines `PROMPT_TEMPLATE` plus `COMPLETION_TEMPLATE`:
+The extractor's Docker image and the `process_goals` Docker environment target
+Isabelle2025-2. With a local Isabelle installation, register and build the
+extractor from the repository root:
 
-```jinja2
-You are an expert Isabelle/HOL proof assistant. Complete the current subgoal in the unfinished proof using a single one-liner command sequence.
-
-CRITICAL RULES:
-1. The completion MUST be a single line containing at most one `by` invocation, optionally preceded by `using` or `unfolding` clauses.
-2. Allowed formats:
-   - `by <method>`
-   - `using <facts> by <method>`
-   - `unfolding <definitions> by <method>`
-   - `using <facts> unfolding <definitions> by <method>`
-3. Do NOT use multi-step or structural proof commands (e.g., `proof`, `qed`, `have`, `show`, `fix`, `assume`, `next`, `obtain`).
-4. Do NOT use interactive, diagnostic, or unfinished commands (e.g., `apply`, `sledgehammer`, `sorry`, `oops`, `try0`).
-5. Output ONLY the raw Isabelle proof text to complete the proof. Do not include any explanations, markdown code blocks, comments, or preamble.
-
-<context_theory>
-{{ proof_text_before }}
-</context_theory>
-
-<proof_state>
-{{ state_before }}
-</proof_state>
-
-{% if suggested_facts -%}
-<suggested_facts>
-{{ suggested_facts }}
-</suggested_facts>
-{%- endif %}
-
-<unfinished_proof>
-{{ proof_block }}
-</unfinished_proof>
-
-Complete the proof:
-```
-
----
-
-## Getting Started
-
-### 1. Proof Step Extraction
-To extract datasets from your Isabelle theories:
 ```bash
-# Register the extractor component
-isabelle components -u /path/to/isabelle-llm/extractor
-
-# Rebuild Scala tools
+isabelle components -u "$PWD/extractor"
 isabelle scala_build
-
-# Run the extractor
-isabelle proof_extractor -m 16 -c 4000 -T theories.txt -d out
+isabelle proof_extractor -?
 ```
-See the [extractor README](extractor/README.md) for usage options and output schemas.
 
-### 2. IDE Suggestions Plugin
-To use interactive LLM recommendations in Isabelle/jEdit:
+For a small extraction without relevance filtering:
+
 ```bash
-# Register the plugin component
-isabelle components -u /path/to/isabelle-llm/jedit-plugin
+isabelle proof_extractor -m 0 -d out \
+  HOL-Lattice.CompleteLattice HOL-Lattice.Lattice
 ```
-Once registered, the plugin will load on Isabelle startup and expose the **LLM Suggestions** dockable panel in jEdit.
 
+The command writes parsed records below `out/json/` and raw PIDE exports below
+`out/export/`. See the [extractor documentation](extractor/README.md) for theory
+lists, filtering options, output fields, and Docker usage.
 
-## SFT steps
-0. `cd isabelle-llm`
-1. Put extracted json pairs in `extractor/proof_extractor_out/json/*.json`
-2. Run `sft/sft-data$ ./prepare_sft_data.py` to generare train.json and test.json
-3. Run `sft/slurm/submit_finetune_model.sh` to submit an SFT job on HPC and get a job id
-4. Run `sft/slurm//monitor_slurm_job.sh <job-id>` to monitor the job 
+## Other workflows
+
+- [Goal processing and distillation](process_goals/README.md)
+- [Isabelle/jEdit integration](jedit-plugin/README.md)
+- [Isar REPL and MCP integration](repl/README.md)
+- [Supervised fine-tuning](sft/README.md)
+- [Verifier-guided reinforcement learning](rl/slurm/README.md)
+- [Semantic-search experiments](semantic-search/README.md)
+
+SFT prompt templates are defined in
+[`sft/non_thinking_prompt_leaves.py`](sft/non_thinking_prompt_leaves.py) and
+[`sft/non_thinking_prompt_isar.py`](sft/non_thinking_prompt_isar.py).
